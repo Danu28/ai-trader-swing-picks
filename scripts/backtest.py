@@ -87,79 +87,68 @@ def main():
     as_of_date = args.as_of
     top_n = args.top
 
-    print("=" * 60)
-    print(f"  BACKTEST -- As-of: {as_of_date}")
-    print("=" * 60)
-
     print(f"\n[1/3] Computing factors as of {as_of_date}...")
     factor_result = run_factors(as_of_date=as_of_date)
-    print(f"      {factor_result['computed']} scored, {factor_result['filtered_out']} filtered")
-
     regime = factor_result.get("regime", {})
     regime_label = regime.get("regime", "unknown")
-    if regime:
-        print(f"      Regime: {regime_label.upper()} | Nifty: {regime.get('nifty_trend')}")
 
+    print("=" * 60)
+    breadth = regime.get('breadth_ratio', '?') if regime else '?'
+    print(f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | Breadth: {breadth}")
+    print("=" * 60)
     if not args.weights:
         if regime_label == "risk_off":
             weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
-            print(f"      Weights: risk_off (M:0.20, T:0.20, MR:0.25, Q:0.35)")
         elif regime_label == "neutral":
             weights = {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
-            print(f"      Weights: neutral (M:0.30, T:0.25, MR:0.25, Q:0.20)")
         else:
             weights = {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
-            print(f"      Weights: {regime_label} (standard)")
     else:
         for pair in args.weights.split(','):
             k, v = pair.split('=')
             weights[k.strip()] = float(v.strip())
-        print(f"      Weights: custom ({weights})")
 
-    print(f"\n[2/3] Screening as of {as_of_date}...")
     screen_result = run_screener(top_n=top_n, weights=weights, as_of_date=as_of_date)
     ranked = screen_result["ranked"]
-    rejected = screen_result.get("rejected", [])
 
     if not ranked:
         print("      No picks found.")
         return
 
-    print(f"      Top {len(ranked)} picks:")
-    for s in ranked:
-        print(f"      #{s['rank']} {s['symbol']} Score:{s['composite']:.1f} Entry:{s['entry_price']:.2f} Target:{s['target_price']:.2f} SL:{s['stoploss']:.2f}")
-
-    print(f"\n[3/3] Forward check from {as_of_date} to today:")
-
     conn = sqlite3.connect(DB_PATH)
-    wins = 0
-    losses = 0
-    draws = 0
 
+    rows = []
     for s in ranked:
         result, detail, stats = check_forward(
             conn, s["symbol"], as_of_date,
             s["entry_price"], s["target_price"], s["stoploss"]
         )
-        tag = {"WIN": "[WIN] ", "LOSS": "[LOSS]", "DRAW": "[DRAW]"}.get(result, "[????]")
-        print(f"\n  {tag} {s['symbol']}: {detail}")
-        if stats:
-            target_str = f"Target: {stats['target_pct']:+.2f}%" if result == "WIN" or result == "LOSS" else ""
-            print(f"      {target_str} | Max gain: {stats['max_gain']:+.2f}% | Max loss: {stats['max_loss']:+.2f}%")
-
-        if result == "WIN":
-            wins += 1
-        elif result == "LOSS":
-            losses += 1
-        else:
-            draws += 1
+        rows.append({
+            "rank": s["rank"], "symbol": s["symbol"], "sector": s["sector"],
+            "entry_date": as_of_date, "entry": s["entry_price"],
+            "target_date": stats["hit_target_date"] or "--",
+            "target": s["target_price"],
+            "sl_date": stats["hit_sl_date"] or "--",
+            "sl": s["stoploss"],
+            "result": result, "target_pct": stats["target_pct"],
+            "max_gain": stats["max_gain"]
+        })
 
     conn.close()
 
-    print(f"\n  --- Summary ---")
-    print(f"  Wins: {wins}/{len(ranked)} | Losses: {losses}/{len(ranked)} | Draws: {draws}/{len(ranked)}")
+    sep = "-" * 135
+    print(f"\n{sep}")
+    print(f"{'#':<3} {'Symbol':<16} {'Sector':<16} {'Ent Date':<12} {'Entry':>10} {'Tgt Date':<12} {'Target':>10} {'SL Date':<12} {'SL':>10} {'Result':>6} {'Tgt%':>7} {'MaxGain':>8}")
+    print(sep)
+    wins = losses = draws = 0
+    for r in rows:
+        print(f"{r['rank']:<3} {r['symbol']:<16} {r['sector']:<16} {r['entry_date']:<12} {r['entry']:>10.2f} {r['target_date']:<12} {r['target']:>10.2f} {r['sl_date']:<12} {r['sl']:>10.2f} {r['result']:>6} {r['target_pct']:>+6.2f}% {r['max_gain']:>+7.2f}%")
+        if r['result'] == "WIN": wins += 1
+        elif r['result'] == "LOSS": losses += 1
+        else: draws += 1
+    print(sep)
     hit_rate = wins / len(ranked) * 100 if len(ranked) > 0 else 0
-    print(f"  Win rate: {hit_rate:.0f}%")
+    print(f"Wins: {wins}/{len(ranked)} | Losses: {losses}/{len(ranked)} | Draws: {draws}/{len(ranked)} | Win rate: {hit_rate:.0f}%")
 
 
 if __name__ == '__main__':
