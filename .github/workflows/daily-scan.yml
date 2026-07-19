@@ -53,11 +53,8 @@ jobs:
             echo "CACHE FALLBACK: Restored DB from '$MATCHED'"
             echo "Pipeline will fetch only missing days (fast, ~2-5 min)"
           else
-            echo "CACHE MISS: No cached DB found — full historical download required (~30 min, first run only)"
+            echo "CACHE MISS: No cached DB found — using committed baseline snapshot (5yr data, ~2-5 min for latest days)"
           fi
-
-      - name: Initialize database (idempotent)
-        run: python scripts/init_db.py
 
       - name: Run pipeline
         run: python scripts/pipeline.py --full --top 5

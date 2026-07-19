@@ -8,19 +8,17 @@ Quantitative swing trade screening across Nifty 50 and Nifty Midcap 150 stocks. 
 ## Quick Start
 
 ```bash
-# Clone and bootstrap
+# Clone — the repo includes a baseline DB with 5 years of data
 git clone <repo>
 cd AI-Trader
 pip install yfinance pandas numpy scipy
 
-# Initialize empty database with 196 Nifty stocks
-python scripts/init_db.py
-
-# First run — fetches ~10 years of OHLCV data from Yahoo Finance, computes factors, screens, reports
+# Run immediately — no init_db needed; fetches only latest days
 python scripts/pipeline.py --full --top 5
 ```
 
-Subsequent runs update incrementally (only new trading days).
+The repo ships with a pre-built `data/market_data.db` (tables + ~5 years of OHLCV data).
+First run fetches only the missing trading days since the snapshot.
 
 ## Usage
 
@@ -85,7 +83,7 @@ AI-Trader/
 │   └── backtest.py        # Historical validation — simulates past run + target/SL hit checking
 ├── output/                # Generated reports (gitignored)
 ├── logs/                  # Per-run JSON logs (gitignored)
-├── data/market_data.db    # SQLite database (gitignored — created by init_db.py)
+├── data/market_data.db    # SQLite database (committed — 5yr baseline snapshot)
 ├── .opencode/skills/swing-picks/SKILL.md
 └── README.md
 ```
