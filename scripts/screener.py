@@ -161,6 +161,23 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
         if len(ranked) >= top_n:
             break
 
+    # Minimum composite score filter — drop picks below threshold
+    MIN_SCORE = 70
+    below_threshold = [s for s in ranked if s["composite"] < MIN_SCORE]
+    ranked = [s for s in ranked if s["composite"] >= MIN_SCORE]
+
+    if below_threshold:
+        if not ranked:
+            log({"stage": "screen", "status": "warning",
+                 "warning": f"No picks above minimum score threshold ({MIN_SCORE})",
+                 "top_available": [f"{s['symbol']}={s['composite']:.1f}" for s in sorted(below_threshold, key=lambda x: x["composite"], reverse=True)[:5]],
+                 "ts": datetime.now().isoformat()})
+        else:
+            log({"stage": "screen", "status": "info",
+                 "filtered_below_min_score": len(below_threshold),
+                 "filtered": [f"{s['symbol']}={s['composite']:.1f}" for s in below_threshold],
+                 "ts": datetime.now().isoformat()})
+
     for stock in ranked:
         symbol = stock["symbol"]
         price = get_current_price(conn, symbol, as_of_date=as_of_date)
@@ -206,11 +223,13 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
     entry = {"stage": "screen", "status": "complete", "top_n": len(ranked),
              "sector_distribution": sector_dist,
              "rejected_count": len(rejected), "rejected": rejected,
+             "below_threshold_count": len(below_threshold),
              "ts": datetime.now().isoformat()}
     log(entry)
 
     conn.close()
-    return {"ranked": ranked, "rejected": rejected, "run_ts": run_ts}
+    return {"ranked": ranked, "rejected": rejected, "run_ts": run_ts,
+            "below_threshold": below_threshold}
 
 
 if __name__ == '__main__':

@@ -96,6 +96,15 @@ def main():
     if rejected:
         all_warnings.append(f"Screen: {len(rejected)} stocks rejected (sector cap, etc.)")
 
+    if not ranked:
+        below = screen_result.get("below_threshold", [])
+        if below:
+            top_available = sorted(below, key=lambda x: x["composite"], reverse=True)[:5]
+            scores_str = ", ".join(f"{s['symbol']}={s['composite']:.1f}" for s in top_available)
+            print(f"      No picks above minimum score threshold (70). Top available: {scores_str}")
+        else:
+            print(f"      No picks above minimum score threshold (70).")
+
     print("[4/4] Generating reports...")
     report_result = run_reporter(ranked, rejected, run_ts, weights)
     all_warnings.extend(report_result.get("warnings", []))

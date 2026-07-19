@@ -117,7 +117,8 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
 
 
 def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
-                           spike_label, spike_ratio, spike_blocked, rows, summary):
+                           spike_label, spike_ratio, spike_blocked, rows, summary,
+                           below_threshold_count=0):
     """Generate standalone HTML backtest report matching reporter.py dark theme."""
     vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
     vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
@@ -141,10 +142,12 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
                 row_class = "result-draw"
                 result_color = "#d29922"
 
+            score_color = "#3fb950" if r["score"] >= 70 else "#c9d1d9"
             table_rows_html += f'''
         <tr class="{row_class}">
           <td class="rank">#{r["rank"]}</td>
           <td><strong>{r["symbol"]}</strong><br><small>{sec}</small></td>
+          <td style="text-align:right;color:{score_color};">{r["score"]:.1f}</td>
           <td>{r["entry_date"]}</td>
           <td class="price">₹{r["entry"]:,.2f}</td>
           <td class="price target">₹{r["target"]:,.2f}</td>
@@ -162,7 +165,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     if summary:
         summary_html = f'''
       <tr class="summary-row">
-        <td colspan="12">
+        <td colspan="13">
           <strong>Total Return: {summary["total_return"]:+.2f}%</strong> &nbsp;|&nbsp;
           Avg Return: {summary["avg_return"]:+.2f}% &nbsp;|&nbsp;
           Win Rate: {summary["win_rate"]:.0f}% &nbsp;|&nbsp;
@@ -189,6 +192,8 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     total_return_str = f"{summary['total_return']:+.2f}%" if summary else "N/A"
     regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(regime_label, "[--]")
     regime_display = regime_label.replace("_", " ").upper()
+
+    filter_info = f" &nbsp;|&nbsp; Score filter: &ge;70 ({below_threshold_count} filtered)" if below_threshold_count > 0 else ""
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -225,7 +230,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
 <body>
 <div class="container">
   <h1>Backtest Report</h1>
-  <p class="subtitle">{as_of_date} &nbsp;|&nbsp; Regime: {regime_emoji} {regime_display} &nbsp;|&nbsp; VIX: {vix_proxy_str}/{vix_20d_str} &nbsp;|&nbsp; {spike_label} &nbsp;|&nbsp; R:R 1:1</p>
+  <p class="subtitle">{as_of_date} &nbsp;|&nbsp; Regime: {regime_emoji} {regime_display} &nbsp;|&nbsp; VIX: {vix_proxy_str}/{vix_20d_str} &nbsp;|&nbsp; {spike_label} &nbsp;|&nbsp; R:R 1:1{filter_info}</p>
 
   <div class="meta">
     <div class="meta-card"><div class="label">Regime</div><div class="value">{regime_emoji} {regime_display}</div></div>
@@ -239,7 +244,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
 {warning_html}
 {f'''  <table>
     <thead>
-      <tr><th>#</th><th>Symbol</th><th>Date</th><th>Entry</th><th>Target</th><th>SL</th><th>F</th><th>Result</th><th>Ret%</th><th>Days</th><th>Tgt Hit</th><th>SL Hit</th></tr>
+       <tr><th>#</th><th>Symbol</th><th>Score</th><th>Date</th><th>Entry</th><th>Target</th><th>SL</th><th>F</th><th>Result</th><th>Ret%</th><th>Days</th><th>Tgt Hit</th><th>SL Hit</th></tr>
     </thead>
     <tbody>{table_rows_html}
 {summary_html}
@@ -264,6 +269,8 @@ def main():
     parser.add_argument('--as-of', type=str, required=True, help='Backtest date YYYY-MM-DD')
     parser.add_argument('--top', type=int, default=5)
     parser.add_argument('--weights', type=str, default=None)
+    parser.add_argument('--no-regime-gate', action='store_true',
+                        help='Skip regime-based weight override; use default weights')
     args = parser.parse_args()
 
     as_of_date = args.as_of
@@ -305,14 +312,17 @@ def main():
                             "ts": datetime.now().isoformat()}))
         report_path = generate_backtest_html(
             as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
-            spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None
+            spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None,
+            below_threshold_count=0
         )
         print(f"\n  HTML Report: {report_path}")
         return
 
     weights = {}
     if not args.weights:
-        if regime_label == "risk_off":
+        if args.no_regime_gate:
+            weights.update({"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15})
+        elif regime_label == "risk_off":
             weights.update({"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35})
         elif regime_label == "neutral":
             weights.update({"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20})
@@ -327,8 +337,15 @@ def main():
     ranked = screen_result["ranked"]
 
     if not ranked:
+        below_threshold_count = len(screen_result.get("below_threshold", []))
+        if below_threshold_count > 0:
+            print(f"  Score filter: >=70 | {below_threshold_count} picks below threshold filtered")
         print("      No picks found.")
         return
+
+    below_threshold_count = len(screen_result.get("below_threshold", []))
+    if below_threshold_count > 0:
+        print(f"  Score filter: >=70 | {below_threshold_count} picks below threshold filtered")
 
     conn = sqlite3.connect(DB_PATH)
 
@@ -363,6 +380,7 @@ def main():
         rows.append({
             "rank": s["rank"],
             "symbol": s["symbol"].replace(".NS", ""),
+            "score": round(s["composite"], 1),
             "sector": s["sector"],
             "entry_date": str(stats["entry_actual_date"]),
             "entry": s["entry_price"],
@@ -386,7 +404,7 @@ def main():
     BOLD = '\033[1m'
 
     # Build table
-    hdr = (f"{'#':<3}  {'Symbol':<14}  {'Sector':<8}  {'Date':<10}  "
+    hdr = (f"{'#':<3}  {'Symbol':<14}  {'Score':>5}  {'Sector':<8}  {'Date':<10}  "
            f"{'Entry':>8}  {'Target':>8}  {'SL':>8}  {'F':1}  {'Res':5}  "
            f"{'Ret%':>7}  {'Days':>5}  {'Tgt Hit':<10}  {'SL Hit':<10}")
     sep = "-" * len(hdr)
@@ -401,7 +419,7 @@ def main():
         tgt_date_str = str(r["target_date"]) if r["target_date"] else "--"
         sl_date_str = str(r["sl_date"]) if r["sl_date"] else "--"
 
-        row_str = (f"{r['rank']:<3}  {r['symbol']:<14}  {sec:<8}  "
+        row_str = (f"{r['rank']:<3}  {r['symbol']:<14}  {r['score']:>5.1f}  {sec:<8}  "
                    f"{r['entry_date']:<10}  {r['entry']:>8.2f}  {r['target']:>8.2f}  "
                    f"{r['sl']:>8.2f}  {fill_char:1}  {r['result']:5}  "
                    f"{r['return_pct']:>+6.2f}%  {r['hold_days']:>5}  "
@@ -437,7 +455,8 @@ def main():
     }
     report_path = generate_backtest_html(
         as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
-        spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict
+        spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict,
+        below_threshold_count=below_threshold_count
     )
     print(f"\n  HTML Report: {report_path}")
 
