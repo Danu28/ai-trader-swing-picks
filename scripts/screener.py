@@ -105,6 +105,9 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
         if liq < 25:
             continue
 
+        if vol > 85:
+            continue
+
         momentum_cat = (mp + mv + rs) / 3.0
         trend_cat = (ta + ms) / 2.0
         mean_rev_cat = (pb + rsi) / 2.0
@@ -165,8 +168,8 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
 
         entry_price = price
 
-        target_price = entry_price + (2 * atr_val) if atr_val > 0 else entry_price * 1.05
-        stoploss = entry_price - (1 * atr_val) if atr_val > 0 else entry_price * 0.97
+        target_price = entry_price + (1.5 * atr_val) if atr_val > 0 else entry_price * 1.04
+        stoploss = entry_price - (1.5 * atr_val) if atr_val > 0 else entry_price * 0.96
 
         stock["entry_price"] = round(entry_price, 2)
         stock["target_price"] = round(target_price, 2)
