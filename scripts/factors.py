@@ -328,7 +328,7 @@ def run(weights=None, as_of_date=None):
     momentum_prices = np.array([r['momentum_price_raw'] for r in results])
     momentum_vols = np.array([r['momentum_vol_raw'] for r in results])
     trend_adxs = np.array([r['trend_adx_raw'] for r in results])
-    ma_structures = np.array([r['ma_structure_raw'] for r in results])
+    ma_structures = np.array([r['ma_structure_raw'] for r in results], dtype=float)
     pullbacks = np.array([r['pullback_raw'] for r in results])
     rsis = np.array([r['rsi_raw'] for r in results])
     liquiditys = np.array([r['liquidity_raw'] for r in results])
