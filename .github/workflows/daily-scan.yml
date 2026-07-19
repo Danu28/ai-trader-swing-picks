@@ -37,17 +37,64 @@ jobs:
 
       - name: Restore market data from cache
         id: db-cache
-        uses: actions/cache@v3
+        uses: actions/cache/restore@v3
         with:
           path: data/market_data.db
           key: market-data-${{ env.CACHE_DATE }}
           restore-keys: market-data-
+
+      - name: Report cache status
+        run: |
+          HIT="${{ steps.db-cache.outputs.cache-hit }}"
+          MATCHED="${{ steps.db-cache.outputs.cache-matched-key }}"
+          if [ "$HIT" = "true" ]; then
+            echo "CACHE HIT: Restored today's cached DB"
+          elif [ -n "$MATCHED" ]; then
+            echo "CACHE FALLBACK: Restored DB from '$MATCHED'"
+            echo "Pipeline will fetch only missing days (fast, ~2-5 min)"
+          else
+            echo "CACHE MISS: No cached DB found — full historical download required (~30 min, first run only)"
+          fi
 
       - name: Initialize database (idempotent)
         run: python scripts/init_db.py
 
       - name: Run pipeline
         run: python scripts/pipeline.py --full --top 5
+
+      - name: Verify database freshness
+        run: |
+          python3 -c "
+          import sqlite3, os
+          from datetime import date
+          db = os.path.join('data', 'market_data.db')
+          conn = sqlite3.connect(db)
+          c = conn.cursor()
+          c.execute('SELECT COUNT(*) FROM daily_ohlcv')
+          total = c.fetchone()[0]
+          c.execute('SELECT COUNT(DISTINCT symbol) FROM daily_ohlcv')
+          symbols = c.fetchone()[0]
+          c.execute('SELECT MIN(date), MAX(date) FROM daily_ohlcv')
+          earliest, latest = c.fetchone()
+          today = date.today().isoformat()
+          c.execute('SELECT COUNT(*) FROM daily_ohlcv WHERE date = ?', (today,))
+          today_rows = c.fetchone()[0]
+          size_mb = os.path.getsize(db) / (1024 * 1024)
+          print(f'DB Stats:')
+          print(f'  File size:      {size_mb:.1f} MB')
+          print(f'  Total rows:     {total:,}')
+          print(f'  Symbols:        {symbols}')
+          print(f'  Date range:     {earliest or \"N/A\"} → {latest or \"N/A\"}')
+          print(f'  Today rows:     {today_rows}')
+          conn.close()
+          "
+
+      - name: Save updated DB to cache
+        if: success() && steps.db-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v3
+        with:
+          path: data/market_data.db
+          key: market-data-${{ env.CACHE_DATE }}
 
       - name: Prepare report for Pages
         run: |
