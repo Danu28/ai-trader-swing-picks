@@ -62,20 +62,6 @@ def get_current_price(conn, symbol, as_of_date=None):
     return float(row[0]) if row else 0
 
 
-def get_20sma(conn, symbol, as_of_date=None):
-    if as_of_date:
-        row = conn.execute(
-            "SELECT AVG(close) FROM (SELECT close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 20)",
-            (symbol, as_of_date)
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT AVG(close) FROM (SELECT close FROM daily_ohlcv WHERE symbol = ? ORDER BY date DESC LIMIT 20)",
-            (symbol,)
-        ).fetchone()
-    return float(row[0]) if row and row[0] else 0
-
-
 def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
     if weights is None:
         weights = dict(DEFAULT_WEIGHTS)
@@ -177,11 +163,7 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
         price = get_current_price(conn, symbol, as_of_date=as_of_date)
         atr_val = compute_atr(conn, symbol, as_of_date=as_of_date)
 
-        if stock["factor_detail"]["pullback"] > 65:
-            sma20 = get_20sma(conn, symbol, as_of_date=as_of_date)
-            entry_price = sma20 if sma20 > 0 and sma20 < price else price
-        else:
-            entry_price = price
+        entry_price = price
 
         target_price = entry_price + (2 * atr_val) if atr_val > 0 else entry_price * 1.05
         stoploss = entry_price - (1 * atr_val) if atr_val > 0 else entry_price * 0.97
