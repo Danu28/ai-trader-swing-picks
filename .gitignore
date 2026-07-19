@@ -1,0 +1,21 @@
+# Data
+data/market_data.db
+
+# Generated output
+output/
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Dev state
+.devloop/
+
+# Opencode
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+
+# Temp files
+*.tmp
