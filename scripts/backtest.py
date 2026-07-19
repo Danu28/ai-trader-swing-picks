@@ -13,15 +13,16 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data',
 
 
 def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss):
-    # Verify entry was fillable on signal date
+    # Verify entry was fillable on last trading day <= signal date
     entry_row = conn.execute(
-        "SELECT high, low, close FROM daily_ohlcv WHERE symbol = ? AND date = ?",
+        "SELECT date, high, low, close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (symbol, as_of_date)
     ).fetchone()
 
     entry_filled = False
+    entry_actual_date = as_of_date
     if entry_row:
-        day_high, day_low, day_close = float(entry_row[0]), float(entry_row[1]), float(entry_row[2])
+        entry_actual_date, day_high, day_low, day_close = entry_row[0], float(entry_row[1]), float(entry_row[2]), float(entry_row[3])
         entry_filled = day_low <= entry_price <= day_high
 
     df_rows = conn.execute(
@@ -90,7 +91,8 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
         "hit_sl_date": hit_stoploss,
         "tgt_high": round(tgt_high, 2) if tgt_high else None,
         "sl_low": round(sl_low, 2) if sl_low else None,
-        "entry_filled": entry_filled
+        "entry_filled": entry_filled,
+        "entry_actual_date": entry_actual_date
     }
 
 
@@ -143,7 +145,7 @@ def main():
         )
         rows.append({
             "rank": s["rank"], "symbol": s["symbol"], "sector": s["sector"],
-            "entry_date": as_of_date, "entry": s["entry_price"],
+            "entry_date": stats["entry_actual_date"], "entry": s["entry_price"],
             "entry_filled": "YES" if stats["entry_filled"] else "NO",
             "target_date": stats["hit_target_date"] or "--",
             "target": s["target_price"],
