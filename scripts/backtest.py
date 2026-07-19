@@ -10,6 +10,26 @@ from factors import run as run_factors
 from screener import run as run_screener
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'market_data.db')
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output')
+
+SECTOR_ABBR = {
+    "Financial Services": "Fin Svc",
+    "Metals & Mining": "Metals",
+    "Consumer Durables": "Cons Dur",
+    "Information Technology": "IT",
+    "Pharmaceuticals": "Pharma",
+    "Telecommunication": "Telecom",
+    "Construction": "Constr",
+    "Automobile": "Auto",
+    "Healthcare": "Health",
+    "Consumer Services": "Cons Svc",
+    "Capital Goods": "Cap Good",
+    "Services": "Service",
+    "Chemicals": "Chem",
+    "Fertilisers & Pesticides": "FertChem",
+    "Media & Entertainment": "Media",
+    "Oil & Gas": "Oil&Gas",
+}
 
 
 def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss):
@@ -96,6 +116,148 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
     }
 
 
+def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
+                           spike_label, spike_ratio, spike_blocked, rows, summary):
+    """Generate standalone HTML backtest report matching reporter.py dark theme."""
+    vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
+    vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
+
+    # Build table rows
+    table_rows_html = ""
+    if rows:
+        for r in rows:
+            sec = SECTOR_ABBR.get(r["sector"], r["sector"][:8])
+            fill_char = "Y" if r["entry_filled"] else "N"
+            tgt_date_str = str(r["target_date"]) if r["target_date"] else "--"
+            sl_date_str = str(r["sl_date"]) if r["sl_date"] else "--"
+
+            if r["result"] == "WIN":
+                row_class = "result-win"
+                result_color = "#3fb950"
+            elif r["result"] == "LOSS":
+                row_class = "result-loss"
+                result_color = "#f85149"
+            else:
+                row_class = "result-draw"
+                result_color = "#d29922"
+
+            table_rows_html += f'''
+        <tr class="{row_class}">
+          <td class="rank">#{r["rank"]}</td>
+          <td><strong>{r["symbol"]}</strong><br><small>{sec}</small></td>
+          <td>{r["entry_date"]}</td>
+          <td class="price">₹{r["entry"]:,.2f}</td>
+          <td class="price target">₹{r["target"]:,.2f}</td>
+          <td class="price stoploss">₹{r["sl"]:,.2f}</td>
+          <td>{fill_char}</td>
+          <td style="color:{result_color};font-weight:600;">{r["result"]}</td>
+          <td style="color:{result_color};">{r["return_pct"]:+.2f}%</td>
+          <td>{r["hold_days"]}</td>
+          <td>{tgt_date_str}</td>
+          <td>{sl_date_str}</td>
+        </tr>'''
+
+    # Summary row
+    summary_html = ""
+    if summary:
+        summary_html = f'''
+      <tr class="summary-row">
+        <td colspan="12">
+          <strong>Total Return: {summary["total_return"]:+.2f}%</strong> &nbsp;|&nbsp;
+          Avg Return: {summary["avg_return"]:+.2f}% &nbsp;|&nbsp;
+          Win Rate: {summary["win_rate"]:.0f}% &nbsp;|&nbsp;
+          Avg Hold Days: {summary["avg_hold"]:.1f} &nbsp;|&nbsp;
+          Wins: {summary["wins"]} &nbsp;|&nbsp; Losses: {summary["losses"]} &nbsp;|&nbsp; Draws: {summary["draws"]}
+        </td>
+      </tr>'''
+
+    # Warning banner for spike-blocked case
+    warning_html = ""
+    if spike_blocked:
+        warning_html = f'''
+    <div class="warnings">
+      <h3>Volatility Spike Detected &mdash; No Trades Executed</h3>
+      <ul>
+        <li>VIX proxy: {vix_proxy_str} | 20-day avg: {vix_20d_str} | Spike ratio: {spike_ratio:.2f}x</li>
+        <li>Skipping picks &mdash; high risk of stop-outs during regime transition.</li>
+        <li>No trades on {as_of_date}.</li>
+      </ul>
+    </div>'''
+
+    # Meta cards
+    win_rate_str = f"{summary['win_rate']:.0f}%" if summary else "N/A"
+    total_return_str = f"{summary['total_return']:+.2f}%" if summary else "N/A"
+    regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(regime_label, "[--]")
+    regime_display = regime_label.replace("_", " ").upper()
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest Report &mdash; {as_of_date}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; }}
+  .container {{ max-width: 1200px; margin: 0 auto; }}
+  h1 {{ color: #58a6ff; font-size: 1.8em; margin-bottom: 4px; }}
+  .subtitle {{ color: #8b949e; margin-bottom: 24px; }}
+  .meta {{ display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }}
+  .meta-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 120px; }}
+  .meta-card .label {{ color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; }}
+  .meta-card .value {{ color: #c9d1d9; font-size: 1.2em; font-weight: 600; margin-top: 2px; }}
+  table {{ width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }}
+  th {{ background: #21262d; color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 10px; text-align: left; }}
+  td {{ padding: 10px; border-top: 1px solid #21262d; font-size: 0.9em; }}
+  .rank {{ color: #58a6ff; font-weight: 700; }}
+  .price {{ font-family: 'JetBrains Mono', 'Consolas', monospace; }}
+  .target {{ color: #3fb950; }}
+  .stoploss {{ color: #f85149; }}
+  .result-win {{ background: rgba(63, 185, 80, 0.06); }}
+  .result-loss {{ background: rgba(248, 81, 73, 0.06); }}
+  .result-draw {{ background: rgba(210, 153, 34, 0.06); }}
+  .summary-row td {{ background: #21262d; color: #c9d1d9; font-size: 0.9em; padding: 12px; border-top: 2px solid #30363d; text-align: center; }}
+  .warnings {{ background: #1a1a0a; border: 1px solid #d29922; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+  .warnings h3 {{ color: #d29922; margin-top: 0; }}
+  .warnings ul {{ margin: 0; padding-left: 20px; color: #e3b341; }}
+  .footer {{ color: #484f58; font-size: 0.75em; text-align: center; margin-top: 30px; }}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Backtest Report</h1>
+  <p class="subtitle">{as_of_date} &nbsp;|&nbsp; Regime: {regime_emoji} {regime_display} &nbsp;|&nbsp; VIX: {vix_proxy_str}/{vix_20d_str} &nbsp;|&nbsp; {spike_label} &nbsp;|&nbsp; R:R 1:1</p>
+
+  <div class="meta">
+    <div class="meta-card"><div class="label">Regime</div><div class="value">{regime_emoji} {regime_display}</div></div>
+    <div class="meta-card"><div class="label">Breadth</div><div class="value">{breadth}</div></div>
+    <div class="meta-card"><div class="label">VIX Proxy</div><div class="value">{vix_proxy_str}</div></div>
+    <div class="meta-card"><div class="label">VIX 20d Avg</div><div class="value">{vix_20d_str}</div></div>
+    <div class="meta-card"><div class="label">Win Rate</div><div class="value">{win_rate_str}</div></div>
+    <div class="meta-card"><div class="label">Total Return</div><div class="value">{total_return_str}</div></div>
+    <div class="meta-card"><div class="label">R:R</div><div class="value">1:1</div></div>
+  </div>
+{warning_html}
+{f'''  <table>
+    <thead>
+      <tr><th>#</th><th>Symbol</th><th>Date</th><th>Entry</th><th>Target</th><th>SL</th><th>F</th><th>Result</th><th>Ret%</th><th>Days</th><th>Tgt Hit</th><th>SL Hit</th></tr>
+    </thead>
+    <tbody>{table_rows_html}
+{summary_html}
+    </tbody>
+  </table>''' if not spike_blocked else ''}
+
+  <div class="footer">AI-Trader Swing Picks &mdash; Backtest &bull; Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &bull; Pipeline v1.0</div>
+</div>
+</body>
+</html>'''
+
+    report_path = os.path.join(OUTPUT_DIR, f'backtest_{as_of_date}.html')
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+    return report_path
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -112,10 +274,42 @@ def main():
     regime = factor_result.get("regime", {})
     regime_label = regime.get("regime", "unknown")
 
-    print("=" * 60)
     breadth = regime.get('breadth_ratio', '?') if regime else '?'
-    print(f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | Breadth: {breadth}")
-    print("=" * 60)
+    vix_proxy = regime.get('vix_proxy') if regime else None
+    vix_20d_avg = regime.get('vix_20d_avg') if regime else None
+
+    # Compute spike ratio before header
+    spike_ratio = None
+    spike_label = "No spike"
+    if vix_proxy is not None and vix_20d_avg is not None and vix_20d_avg > 0:
+        spike_ratio = round(vix_proxy / vix_20d_avg, 2)
+        if spike_ratio > 1.5:
+            spike_label = "!! SPIKE BLOCKED"
+
+    header = f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | VIX: {vix_proxy}/{vix_20d_avg} | {spike_label} | R:R 1:1"
+    sep = "=" * len(header)
+    print(sep)
+    print(header)
+    print(sep)
+
+    # VIX spike safety check
+    if spike_ratio is not None and spike_ratio > 1.5:
+        print(f"\n*** VOLATILITY SPIKE DETECTED ***")
+        print(f"    VIX proxy: {vix_proxy} | 20-day avg: {vix_20d_avg} | Spike ratio: {spike_ratio:.2f}x")
+        print(f"    Skipping picks -- high risk of stop-outs during regime transition.")
+        print(f"    No trades on {as_of_date}.\n")
+        print(json.dumps({"stage": "backtest", "status": "volatility_spike_skipped",
+                            "as_of_date": as_of_date, "vix_proxy": vix_proxy,
+                            "vix_20d_avg": vix_20d_avg,
+                            "spike_ratio": spike_ratio,
+                            "ts": datetime.now().isoformat()}))
+        report_path = generate_backtest_html(
+            as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
+            spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None
+        )
+        print(f"\n  HTML Report: {report_path}")
+        return
+
     if not args.weights:
         if regime_label == "risk_off":
             weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
@@ -143,38 +337,108 @@ def main():
             conn, s["symbol"], as_of_date,
             s["entry_price"], s["target_price"], s["stoploss"]
         )
+
+        # Compute actual return %
+        if result == "WIN":
+            return_pct = round((s["target_price"] - s["entry_price"]) / s["entry_price"] * 100, 2)
+        elif result == "LOSS":
+            return_pct = round((s["stoploss"] - s["entry_price"]) / s["entry_price"] * 100, 2)
+        else:
+            return_pct = round((stats["end_close"] - s["entry_price"]) / s["entry_price"] * 100, 2)
+
+        # Compute hold days
+        try:
+            entry_dt = datetime.strptime(str(stats["entry_actual_date"]), "%Y-%m-%d")
+            if result == "WIN" and stats["hit_target_date"]:
+                exit_dt = datetime.strptime(str(stats["hit_target_date"]), "%Y-%m-%d")
+            elif result == "LOSS" and stats["hit_sl_date"]:
+                exit_dt = datetime.strptime(str(stats["hit_sl_date"]), "%Y-%m-%d")
+            else:
+                exit_dt = datetime.strptime(str(stats["end_date"]), "%Y-%m-%d")
+            hold_days = (exit_dt - entry_dt).days
+        except (ValueError, TypeError):
+            hold_days = 0
+
         rows.append({
-            "rank": s["rank"], "symbol": s["symbol"], "sector": s["sector"],
-            "entry_date": stats["entry_actual_date"], "entry": s["entry_price"],
-            "entry_filled": "YES" if stats["entry_filled"] else "NO",
-            "target_date": stats["hit_target_date"] or "--",
+            "rank": s["rank"],
+            "symbol": s["symbol"].replace(".NS", ""),
+            "sector": s["sector"],
+            "entry_date": str(stats["entry_actual_date"]),
+            "entry": s["entry_price"],
+            "entry_filled": stats["entry_filled"],
+            "target_date": stats["hit_target_date"] or None,
             "target": s["target_price"],
-            "tgt_high": stats["tgt_high"],
-            "sl_date": stats["hit_sl_date"] or "--",
+            "sl_date": stats["hit_sl_date"] or None,
             "sl": s["stoploss"],
-            "sl_low": stats["sl_low"],
-            "result": result, "target_pct": stats["target_pct"],
-            "max_gain": stats["max_gain"]
+            "result": result,
+            "return_pct": return_pct,
+            "hold_days": hold_days
         })
 
     conn.close()
 
-    sep = "-" * 148
+    # ANSI colors
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+
+    # Build table
+    hdr = (f"{'#':<3}  {'Symbol':<14}  {'Sector':<8}  {'Date':<10}  "
+           f"{'Entry':>8}  {'Target':>8}  {'SL':>8}  {'F':1}  {'Res':5}  "
+           f"{'Ret%':>7}  {'Days':>5}  {'Tgt Hit':<10}  {'SL Hit':<10}")
+    sep = "-" * len(hdr)
     print(f"\n{sep}")
-    hdr = f"{'#':<3} {'Symbol':<16} {'Sector':<16} {'Ent Date':<12} {'Entry':>10} Fill {'Tgt Date':<12} {'Target':>10} {'Tgt Hi':>8} {'SL Date':<12} {'SL':>10} {'SL Lo':>8} {'Res':>4} {'Tgt%':>7} {'MaxGain':>8}"
     print(hdr)
     print(sep)
+
     wins = losses = draws = 0
     for r in rows:
-        tgth = f"{r['tgt_high']:>8.2f}" if r['tgt_high'] else "      --"
-        sll = f"{r['sl_low']:>8.2f}" if r['sl_low'] else "      --"
-        print(f"{r['rank']:<3} {r['symbol']:<16} {r['sector']:<16} {r['entry_date']:<12} {r['entry']:>10.2f} {r['entry_filled']:<4} {r['target_date']:<12} {r['target']:>10.2f} {tgth} {r['sl_date']:<12} {r['sl']:>10.2f} {sll} {r['result']:>4} {r['target_pct']:>+6.2f}% {r['max_gain']:>+7.2f}%")
-        if r['result'] == "WIN": wins += 1
-        elif r['result'] == "LOSS": losses += 1
-        else: draws += 1
+        sec = SECTOR_ABBR.get(r["sector"], r["sector"][:8])
+        fill_char = "Y" if r["entry_filled"] else "N"
+        tgt_date_str = str(r["target_date"]) if r["target_date"] else "--"
+        sl_date_str = str(r["sl_date"]) if r["sl_date"] else "--"
+
+        row_str = (f"{r['rank']:<3}  {r['symbol']:<14}  {sec:<8}  "
+                   f"{r['entry_date']:<10}  {r['entry']:>8.2f}  {r['target']:>8.2f}  "
+                   f"{r['sl']:>8.2f}  {fill_char:1}  {r['result']:5}  "
+                   f"{r['return_pct']:>+6.2f}%  {r['hold_days']:>5}  "
+                   f"{tgt_date_str:<10}  {sl_date_str:<10}")
+
+        if r["result"] == "WIN":
+            color = GREEN
+            wins += 1
+        elif r["result"] == "LOSS":
+            color = RED
+            losses += 1
+        else:
+            color = YELLOW
+            draws += 1
+        print(f"{color}{row_str}{RESET}")
+
     print(sep)
+
+    # Summary
     hit_rate = wins / len(ranked) * 100 if len(ranked) > 0 else 0
-    print(f"Wins: {wins}/{len(ranked)} | Losses: {losses}/{len(ranked)} | Draws: {draws}/{len(ranked)} | Win rate: {hit_rate:.0f}%")
+    total_return = sum(r["return_pct"] for r in rows)
+    avg_return = total_return / len(rows) if rows else 0
+    avg_hold = sum(r["hold_days"] for r in rows) / len(rows) if rows else 0
+    summary = (f"Total Return: {total_return:+.2f}% | Avg Return: {avg_return:+.2f}% | "
+               f"Win Rate: {hit_rate:.0f}% | Avg Hold Days: {avg_hold:.1f} | "
+               f"Wins: {wins} Losses: {losses}")
+    print(f"{BOLD}{summary}{RESET}")
+
+    summary_dict = {
+        "total_return": total_return, "avg_return": avg_return,
+        "win_rate": hit_rate, "avg_hold": avg_hold,
+        "wins": wins, "losses": losses, "draws": draws
+    }
+    report_path = generate_backtest_html(
+        as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
+        spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict
+    )
+    print(f"\n  HTML Report: {report_path}")
 
 
 if __name__ == '__main__':

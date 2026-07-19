@@ -109,11 +109,12 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
 
 def get_market_regime(conn):
     row = conn.execute(
-        "SELECT regime, nifty_trend, breadth_ratio, vix_proxy FROM market_regime ORDER BY date DESC LIMIT 1"
+        "SELECT regime, nifty_trend, breadth_ratio, vix_proxy, vix_20d_avg FROM market_regime ORDER BY date DESC LIMIT 1"
     ).fetchone()
     if row:
         return {"regime": row[0], "nifty_trend": row[1],
-                "breadth_ratio": row[2], "vix_proxy": row[3]}
+                "breadth_ratio": row[2], "vix_proxy": row[3],
+                "vix_20d_avg": row[4]}
     return None
 
 
@@ -197,11 +198,25 @@ def run(ranked, rejected, run_ts, weights):
     entry = {"stage": "report", "status": "complete", "ts": datetime.now().isoformat()}
     log(entry)
 
-    separator = "=" * 70
-    regime_str = market_regime["regime"].replace("_", " ").title() if market_regime else "N/A"
+    # --- build header with VIX / spike info (matching backtest.py format) ---
+    regime_label = market_regime["regime"] if market_regime else "unknown"
+    regime_str = regime_label.replace("_", " ").upper()
+    vix_proxy = market_regime.get("vix_proxy") if market_regime else None
+    vix_20d_avg = market_regime.get("vix_20d_avg") if market_regime else None
+    vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
+    vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
+
+    spike_label = "No spike"
+    if vix_proxy is not None and vix_20d_avg is not None and vix_20d_avg > 0:
+        spike_ratio = vix_proxy / vix_20d_avg
+        if spike_ratio > 1.5:
+            spike_label = "!! SPIKE BLOCKED"
+
+    header = f"  SWING PICKS -- {today} | Regime: {regime_str} | VIX: {vix_proxy_str}/{vix_20d_str} | {spike_label} | R:R 1:1"
+    separator = "=" * len(header)
     print()
     print(separator)
-    print(f"  SWING PICKS -- {today} | Regime: {regime_str}")
+    print(header)
     print(separator)
     print(f"  {'Rank':<5} {'Symbol':<18} {'Score':<8} {'Entry':<12} {'Target':<12} {'Stoploss':<12}")
     print(f"  {'-'*5} {'-'*18} {'-'*8} {'-'*12} {'-'*12} {'-'*12}")
@@ -215,7 +230,7 @@ def run(ranked, rejected, run_ts, weights):
             print(f"  ! {w}")
 
     print()
-    print(f"  Report: {html_path}")
+    print(f"  HTML Report: {html_path}")
     print(f"  Context: {context_path}")
     print(separator)
 

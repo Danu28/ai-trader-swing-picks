@@ -161,10 +161,20 @@ def compute_regime(conn, date, as_of_date=None):
     if len(nifty50_symbols) < 5:
         return None
 
+    # Get last 21 trading dates (current + 20 prior) for rolling average
+    ref_date = as_of_date if as_of_date else date
+    trading_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM daily_ohlcv WHERE date <= ? ORDER BY date DESC LIMIT 21",
+        (ref_date,)
+    ).fetchall()]
+    trading_dates_set = set(trading_dates)
+
     breadth = 0
     returns_21 = []
     atr_sum = 0
     count = 0
+    daily_vix = {}  # date -> list of (atr/close)*100 values across stocks
+
     for sym in nifty50_symbols:
         try:
             if as_of_date:
@@ -187,15 +197,34 @@ def compute_regime(conn, date, as_of_date=None):
             ret_21 = float(df['close'].iloc[-1] / df['close'].shift(21).iloc[-1]) - 1 if len(df) > 21 else 0
             if abs(ret_21) < 1:
                 returns_21.append(ret_21)
+
+            # Compute ATR(14) series
             tr1 = df['high'] - df['low']
             tr2 = abs(df['high'] - df['close'].shift(1))
             tr3 = abs(df['low'] - df['close'].shift(1))
             tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            atr14 = tr.ewm(span=14, adjust=False).mean().iloc[-1]
+            atr14_series = tr.ewm(span=14, adjust=False).mean()
+
+            # Current date ATR/close
+            atr14 = atr14_series.iloc[-1]
             close = df['close'].iloc[-1]
             if close > 0:
                 atr_sum += float(atr14 / close) * 100
             count += 1
+
+            # Collect daily ATR/close ratios for rolling average
+            mask = df['date'].isin(trading_dates_set)
+            if mask.any():
+                filtered = df.loc[mask, ['date', 'close']].copy()
+                filtered['atr'] = atr14_series.loc[mask].values
+                filtered['ratio'] = (filtered['atr'].astype(float) / filtered['close'].astype(float)) * 100
+                for _, row in filtered.iterrows():
+                    dt = row['date']
+                    val = float(row['ratio'])
+                    if not pd.isna(val) and row['close'] > 0:
+                        if dt not in daily_vix:
+                            daily_vix[dt] = []
+                        daily_vix[dt].append(val)
         except Exception:
             continue
 
@@ -205,6 +234,19 @@ def compute_regime(conn, date, as_of_date=None):
     breadth_ratio = round(breadth / count, 2)
     avg_return_21 = np.mean(returns_21) if returns_21 else 0
     vix_proxy = round(atr_sum / count, 2)
+
+    # Compute 20-day rolling average from OHLCV-derived daily VIX proxies
+    vix_20d_avg = None
+    past_daily_avgs = []
+    for d in sorted(daily_vix.keys()):
+        ratios = daily_vix[d]
+        if len(ratios) >= 5:
+            past_daily_avgs.append(round(sum(ratios) / len(ratios), 2))
+    # Exclude current date from rolling average
+    if len(past_daily_avgs) > 1:
+        past_daily_avgs = past_daily_avgs[:-1]
+    if len(past_daily_avgs) >= 5:
+        vix_20d_avg = round(sum(past_daily_avgs) / len(past_daily_avgs), 2)
 
     if avg_return_21 > 0.02 and breadth_ratio > 0.5:
         regime = "risk_on"
@@ -216,9 +258,9 @@ def compute_regime(conn, date, as_of_date=None):
         regime = "neutral"
         nifty_trend = "sideways"
 
-    conn.execute("INSERT OR REPLACE INTO market_regime (date, regime, nifty_trend, breadth_ratio, vix_proxy) VALUES (?, ?, ?, ?, ?)",
-                 (date, regime, nifty_trend, breadth_ratio, vix_proxy))
-    return {"regime": regime, "nifty_trend": nifty_trend, "breadth_ratio": breadth_ratio, "vix_proxy": vix_proxy}
+    conn.execute("INSERT OR REPLACE INTO market_regime (date, regime, nifty_trend, breadth_ratio, vix_proxy, vix_20d_avg) VALUES (?, ?, ?, ?, ?, ?)",
+                 (date, regime, nifty_trend, breadth_ratio, vix_proxy, vix_20d_avg))
+    return {"regime": regime, "nifty_trend": nifty_trend, "breadth_ratio": breadth_ratio, "vix_proxy": vix_proxy, "vix_20d_avg": vix_20d_avg}
 
 
 def run(weights=None, as_of_date=None):

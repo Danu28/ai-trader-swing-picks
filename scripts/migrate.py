@@ -52,6 +52,12 @@ def migrate():
         )
     ''')
 
+    try:
+        c.execute("ALTER TABLE market_regime ADD COLUMN vix_20d_avg REAL")
+        print("  Added vix_20d_avg column to market_regime.")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
     print("Migration complete: factor_scores, screener_results, market_regime tables ready.")

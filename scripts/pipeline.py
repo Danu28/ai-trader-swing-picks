@@ -1,6 +1,8 @@
 import argparse
 import sys
 import os
+import json
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -47,9 +49,25 @@ def main():
     if factor_result.get("regime"):
         r = factor_result["regime"]
         regime_label = r.get("regime", "unknown")
-        print(f"      Regime: {regime_label.replace('_',' ').upper()} | Nifty: {r['nifty_trend']} | Breadth: {r['breadth_ratio']} | VIX proxy: {r['vix_proxy']}")
+        print(f"      Regime: {regime_label.replace('_',' ').upper()} | Nifty: {r['nifty_trend']} | Breadth: {r['breadth_ratio']} | VIX proxy: {r['vix_proxy']} | VIX 20d avg: {r.get('vix_20d_avg', 'N/A')}")
     else:
         regime_label = "unknown"
+
+    # VIX spike safety check
+    regime = factor_result.get("regime", {})
+    vix_proxy = regime.get("vix_proxy")
+    vix_20d_avg = regime.get("vix_20d_avg")
+    if vix_proxy is not None and vix_20d_avg is not None and vix_20d_avg > 0:
+        spike_ratio = vix_proxy / vix_20d_avg
+        if spike_ratio > 1.5:
+            print(f"\n*** VOLATILITY SPIKE DETECTED ***")
+            print(f"    VIX proxy: {vix_proxy} | 20-day avg: {vix_20d_avg} | Spike ratio: {spike_ratio:.2f}x")
+            print(f"    Skipping picks -- high risk of stop-outs during regime transition.\n")
+            print(json.dumps({"stage": "pipeline", "status": "volatility_spike_skipped",
+                               "vix_proxy": vix_proxy, "vix_20d_avg": vix_20d_avg,
+                               "spike_ratio": round(spike_ratio, 2),
+                               "ts": datetime.now().isoformat()}))
+            sys.exit(0)
 
     if not args.weights:
         if regime_label == "risk_off":
