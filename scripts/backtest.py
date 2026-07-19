@@ -85,25 +85,34 @@ def main():
     as_of_date = args.as_of
     top_n = args.top
 
-    weights = {
-        "momentum": 0.35, "trend_quality": 0.25,
-        "mean_reversion": 0.25, "quality": 0.15
-    }
-    if args.weights:
-        for pair in args.weights.split(','):
-            k, v = pair.split('=')
-            weights[k.strip()] = float(v.strip())
-
     print("=" * 60)
-    print(f"  BACKTEST — As-of: {as_of_date}")
+    print(f"  BACKTEST -- As-of: {as_of_date}")
     print("=" * 60)
 
     print(f"\n[1/3] Computing factors as of {as_of_date}...")
     factor_result = run_factors(as_of_date=as_of_date)
     print(f"      {factor_result['computed']} scored, {factor_result['filtered_out']} filtered")
-    if factor_result.get("regime"):
-        r = factor_result["regime"]
-        print(f"      Regime: {r['regime'].upper()} | Nifty: {r['nifty_trend']}")
+
+    regime = factor_result.get("regime", {})
+    regime_label = regime.get("regime", "unknown")
+    if regime:
+        print(f"      Regime: {regime_label.upper()} | Nifty: {regime.get('nifty_trend')}")
+
+    if not args.weights:
+        if regime_label == "risk_off":
+            weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
+            print(f"      Weights: risk_off (M:0.20, T:0.20, MR:0.25, Q:0.35)")
+        elif regime_label == "neutral":
+            weights = {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
+            print(f"      Weights: neutral (M:0.30, T:0.25, MR:0.25, Q:0.20)")
+        else:
+            weights = {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
+            print(f"      Weights: {regime_label} (standard)")
+    else:
+        for pair in args.weights.split(','):
+            k, v = pair.split('=')
+            weights[k.strip()] = float(v.strip())
+        print(f"      Weights: custom ({weights})")
 
     print(f"\n[2/3] Screening as of {as_of_date}...")
     screen_result = run_screener(top_n=top_n, weights=weights, as_of_date=as_of_date)

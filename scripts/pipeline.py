@@ -25,17 +25,6 @@ def main():
     top_n = args.top
     sector_cap = args.sector_cap
 
-    weights = {
-        "momentum": 0.35,
-        "trend_quality": 0.25,
-        "mean_reversion": 0.25,
-        "quality": 0.15
-    }
-    if args.weights:
-        for pair in args.weights.split(','):
-            k, v = pair.split('=')
-            weights[k.strip()] = float(v.strip())
-
     all_warnings = []
 
     if not skip_update:
@@ -57,7 +46,26 @@ def main():
     print(f"      {factor_result['computed']} scored, {factor_result['filtered_out']} filtered")
     if factor_result.get("regime"):
         r = factor_result["regime"]
-        print(f"      Regime: {r['regime'].replace('_',' ').upper()} | Nifty: {r['nifty_trend']} | Breadth: {r['breadth_ratio']} | VIX proxy: {r['vix_proxy']}")
+        regime_label = r.get("regime", "unknown")
+        print(f"      Regime: {regime_label.replace('_',' ').upper()} | Nifty: {r['nifty_trend']} | Breadth: {r['breadth_ratio']} | VIX proxy: {r['vix_proxy']}")
+    else:
+        regime_label = "unknown"
+
+    if not args.weights:
+        if regime_label == "risk_off":
+            weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
+        elif regime_label == "neutral":
+            weights = {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
+        else:
+            weights = {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
+    else:
+        weights = {
+            "momentum": 0.35, "trend_quality": 0.25,
+            "mean_reversion": 0.25, "quality": 0.15
+        }
+        for pair in args.weights.split(','):
+            k, v = pair.split('=')
+            weights[k.strip()] = float(v.strip())
 
     print("[3/4] Screening and ranking...")
     screen_result = run_screener(top_n=top_n, weights=weights, sector_cap=sector_cap)
