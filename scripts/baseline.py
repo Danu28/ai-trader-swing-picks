@@ -22,7 +22,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from factors import run as run_factors
+from factors import run as run_factors, VIX_SPIKE_THRESHOLD
 from screener import run as run_screener
 from backtest import check_forward, DB_PATH, OUTPUT_DIR
 
@@ -172,7 +172,7 @@ def main():
         is_spike = False
         if vix_proxy is not None and vix_20d_avg is not None and vix_20d_avg > 0:
             spike_ratio = vix_proxy / vix_20d_avg
-            if spike_ratio > 1.5:
+            if spike_ratio > VIX_SPIKE_THRESHOLD:
                 is_spike = True
 
         if is_spike:

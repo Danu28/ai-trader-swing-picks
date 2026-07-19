@@ -9,6 +9,9 @@ import numpy as np
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'market_data.db')
 
+# Threshold for VIX spike detection — if VIX proxy / 20d avg exceeds this, skip trades
+VIX_SPIKE_THRESHOLD = 1.5
+
 
 def log(entry):
     print(json.dumps(entry))
