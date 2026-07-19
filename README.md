@@ -1,5 +1,8 @@
 # AI-Trader — Swing Picks Skill
 
+> **Daily Report:** [danu28.github.io/ai-trader-swing-picks](https://danu28.github.io/ai-trader-swing-picks/)  
+> Top 5 swing picks updated every market day at 5:00 PM IST via GitHub Actions.
+
 Quantitative swing trade screening across Nifty 50 and Nifty Midcap 150 stocks. A multi-factor model ranks 196 stocks daily, outputs the top 5 picks with entry price, target, stoploss, and reasoning via console, HTML report, and structured JSON for AI consumption.
 
 ## Quick Start
