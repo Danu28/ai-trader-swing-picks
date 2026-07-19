@@ -17,5 +17,8 @@ __pycache__/
 .opencode/package.json
 .opencode/package-lock.json
 
+# Node
+node_modules/
+
 # Temp files
 *.tmp
