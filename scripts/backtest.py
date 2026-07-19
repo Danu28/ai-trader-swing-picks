@@ -64,9 +64,11 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
         result = "DRAW"
         detail = f"Neither hit. Closed at {end_close:.2f} ({end_change:+.1%}) on {end_date}"
 
+    target_pct = round((target_price - entry_price) / entry_price * 100, 2)
     return result, detail, {
         "max_gain": round(max_gain_pct * 100, 2),
         "max_loss": round(max_loss_pct * 100, 2),
+        "target_pct": target_pct,
         "end_close": end_close,
         "end_date": end_date,
         "hit_target_date": hit_target,
@@ -142,7 +144,8 @@ def main():
         tag = {"WIN": "[WIN] ", "LOSS": "[LOSS]", "DRAW": "[DRAW]"}.get(result, "[????]")
         print(f"\n  {tag} {s['symbol']}: {detail}")
         if stats:
-            print(f"      Max gain: {stats['max_gain']:+.2f}% | Max loss: {stats['max_loss']:+.2f}%")
+            target_str = f"Target: {stats['target_pct']:+.2f}%" if result == "WIN" or result == "LOSS" else ""
+            print(f"      {target_str} | Max gain: {stats['max_gain']:+.2f}% | Max loss: {stats['max_loss']:+.2f}%")
 
         if result == "WIN":
             wins += 1
