@@ -310,13 +310,14 @@ def main():
         print(f"\n  HTML Report: {report_path}")
         return
 
+    weights = {}
     if not args.weights:
         if regime_label == "risk_off":
-            weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
+            weights.update({"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35})
         elif regime_label == "neutral":
-            weights = {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
+            weights.update({"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20})
         else:
-            weights = {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
+            weights.update({"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15})
     else:
         for pair in args.weights.split(','):
             k, v = pair.split('=')
