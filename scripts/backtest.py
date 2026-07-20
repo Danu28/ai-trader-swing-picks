@@ -33,8 +33,22 @@ SECTOR_ABBR = {
 }
 
 
-def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss):
-    # Verify entry was fillable on last trading day <= signal date
+def _compute_atr(conn, symbol, period=14, as_of_date=None):
+    rows = conn.execute(
+        "SELECT high, low, close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT ?",
+        (symbol, as_of_date or '9999-12-31', period + 1)
+    ).fetchall()
+    if len(rows) < period + 1:
+        return 0
+    rows = [(float(r[0]), float(r[1]), float(r[2])) for r in rows]
+    tr_sum = 0
+    for i in range(1, len(rows)):
+        h, l, pc = rows[i][0], rows[i][1], rows[i-1][2]
+        tr_sum += max(h - l, abs(h - pc), abs(l - pc))
+    return tr_sum / period
+
+
+def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss, trail_atr=0.0):
     entry_row = conn.execute(
         "SELECT date, high, low, close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 1",
         (symbol, as_of_date)
@@ -56,12 +70,17 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
 
     hit_target = None
     hit_stoploss = None
+    trail_triggered = None
+    trail_exit_price = None
     tgt_high = None
     sl_low = None
     max_gain_pct = 0
     max_loss_pct = 0
     end_close = float(df_rows[-1][3])
     end_date = df_rows[-1][0]
+    peak = entry_price
+
+    atr_val = _compute_atr(conn, symbol, as_of_date=as_of_date) if trail_atr > 0 else 0
 
     for row in df_rows:
         dt, high, low, close = row[0], float(row[1]), float(row[2]), float(row[3])
@@ -73,6 +92,14 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
             hit_stoploss = dt
             sl_low = low
 
+        if trail_atr > 0 and atr_val > 0 and trail_triggered is None:
+            if high > peak:
+                peak = high
+            trail_level = peak - trail_atr * atr_val
+            if low <= trail_level:
+                trail_triggered = dt
+                trail_exit_price = max(entry_price, trail_level)
+
         gain_pct = (high - entry_price) / entry_price
         loss_pct = (low - entry_price) / entry_price
         if gain_pct > max_gain_pct:
@@ -83,7 +110,17 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
         if hit_target is not None and hit_stoploss is not None:
             break
 
-    if hit_target and hit_stoploss:
+    if trail_triggered:
+        if hit_target and hit_target <= trail_triggered:
+            result = "WIN"
+            detail = f"Target hit on {hit_target}"
+        elif hit_stoploss and hit_stoploss <= trail_triggered:
+            result = "LOSS"
+            detail = f"SL hit on {hit_stoploss}"
+        else:
+            result = "WIN"
+            detail = f"Trail stopped on {trail_triggered} at {trail_exit_price:.2f}"
+    elif hit_target and hit_stoploss:
         if hit_target <= hit_stoploss:
             result = "WIN"
             detail = f"Target hit on {hit_target} (before SL on {hit_stoploss})"
@@ -113,14 +150,17 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
         "tgt_high": round(tgt_high, 2) if tgt_high else None,
         "sl_low": round(sl_low, 2) if sl_low else None,
         "entry_filled": entry_filled,
-        "entry_actual_date": entry_actual_date
+        "entry_actual_date": entry_actual_date,
+        "trail_triggered": trail_triggered,
+        "trail_exit_price": round(trail_exit_price, 2) if trail_exit_price else None,
     }
 
 
 def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
                            spike_label, spike_ratio, spike_blocked, rows, summary,
                            below_threshold_count=0, above_max_count=0,
-                           starting_capital=500000, cost_model=0.25, rr_ratio=1.5):
+                           starting_capital=500000, cost_model=0.25, rr_ratio=1.5,
+                           trail_atr=0.0):
     """Generate standalone HTML backtest report with beautiful-reports design system."""
     vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
     vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
@@ -661,7 +701,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     <span>Breadth: <strong>{breadth}</strong></span>
     <span>VIX: <strong>{vix_proxy_str}</strong> | 20d Avg: <strong>{vix_20d_str}</strong></span>
     <span>{spike_label}</span>
-    <span>R:R {rr_ratio}:1 | Capital: ₹{starting_capital:,.0f} | Cost: {cost_model}%</span>
+    <span>R:R {rr_ratio}:1 | Capital: ₹{starting_capital:,.0f} | Cost: {cost_model}%{(' | Trail: ' + str(trail_atr) + 'x ATR') if trail_atr > 0 else ''}</span>
     <span class="filter-note">{score_filter_info}</span>
   </div>
 
@@ -801,6 +841,8 @@ def main():
                         help='Round-trip cost as %% of trade value (default: 0.25)')
     parser.add_argument('--rr-ratio', type=float, default=None,
                         help='Risk-reward ratio. If not set, uses regime-dependent defaults')
+    parser.add_argument('--trail-atr', type=float, default=0.0,
+                        help='Trailing stop distance in ATR units (0=off)')
     args = parser.parse_args()
 
     as_of_date = args.as_of
@@ -808,6 +850,7 @@ def main():
     starting_capital = args.capital
     risk_per_trade = args.risk_per_trade
     cost_model = args.cost_model
+    trail_atr = args.trail_atr
 
     print(f"\n[1/3] Computing factors as of {as_of_date}...")
     factor_result = run_factors(as_of_date=as_of_date)
@@ -832,7 +875,8 @@ def main():
         if spike_ratio > 1.5:
             spike_label = "!! SPIKE BLOCKED"
 
-    header = f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | VIX: {vix_proxy}/{vix_20d_avg} | {spike_label} | R:R {rr_ratio}:1"
+    trail_label = f" | Trail: {trail_atr}x ATR" if trail_atr > 0 else ""
+    header = f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | VIX: {vix_proxy}/{vix_20d_avg} | {spike_label} | R:R {rr_ratio}:1{trail_label}"
     sep = "=" * len(header)
     print(sep)
     print(header)
@@ -853,7 +897,8 @@ def main():
             as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
             spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None,
             below_threshold_count=0, above_max_count=0,
-            starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio
+            starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio,
+            trail_atr=trail_atr
         )
         print(f"\n  HTML Report: {report_path}")
         return
@@ -903,7 +948,8 @@ def main():
     for s in ranked:
         result, detail, stats = check_forward(
             conn, s["symbol"], as_of_date,
-            s["entry_price"], s["target_price"], s["stoploss"]
+            s["entry_price"], s["target_price"], s["stoploss"],
+            trail_atr=trail_atr
         )
 
         # Compute position size — skip if can't afford even 1 share
@@ -917,8 +963,11 @@ def main():
 
         # Determine exit price and compute P&L
         if result == "WIN":
-            exit_price = s["target_price"]
-            return_pct = round((s["target_price"] - s["entry_price"]) / s["entry_price"] * 100, 2)
+            if stats.get("trail_triggered"):
+                exit_price = stats["trail_exit_price"]
+            else:
+                exit_price = s["target_price"]
+            return_pct = round((exit_price - s["entry_price"]) / s["entry_price"] * 100, 2)
         elif result == "LOSS":
             exit_price = s["stoploss"]
             return_pct = round((s["stoploss"] - s["entry_price"]) / s["entry_price"] * 100, 2)
@@ -937,7 +986,9 @@ def main():
         # Compute hold days
         try:
             entry_dt = datetime.strptime(str(stats["entry_actual_date"]), "%Y-%m-%d")
-            if result == "WIN" and stats["hit_target_date"]:
+            if result == "WIN" and stats.get("trail_triggered"):
+                exit_dt = datetime.strptime(str(stats["trail_triggered"]), "%Y-%m-%d")
+            elif result == "WIN" and stats["hit_target_date"]:
                 exit_dt = datetime.strptime(str(stats["hit_target_date"]), "%Y-%m-%d")
             elif result == "LOSS" and stats["hit_sl_date"]:
                 exit_dt = datetime.strptime(str(stats["hit_sl_date"]), "%Y-%m-%d")
@@ -968,6 +1019,8 @@ def main():
             "pnl_net": round(pnl_net, 2),
             "costs": round(costs, 2),
             "capital_after": round(capital, 2),
+            "trail_triggered": stats.get("trail_triggered"),
+            "trail_exit_price": stats.get("trail_exit_price"),
         })
 
     conn.close()
@@ -1039,10 +1092,12 @@ def main():
         if dd > max_dd:
             max_dd = dd
 
+    trail_count = sum(1 for r in rows if r.get("trail_triggered"))
+    trail_info = f" | Trail: {trail_count}" if trail_atr > 0 else ""
     summary = (f"Total Return: {total_return:+.2f}% | Net Return: {total_return_pct:+.2f}% | "
                f"Final Capital: Rs{final_capital:,.2f} | "
                f"Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1f}% | "
-               f"Win Rate: {hit_rate:.0f}% | Costs: Rs{total_costs:,.2f}")
+               f"Win Rate: {hit_rate:.0f}% | Costs: Rs{total_costs:,.2f}{trail_info}")
     print(f"{BOLD}{summary}{RESET}")
 
     summary_dict = {
@@ -1059,7 +1114,8 @@ def main():
         as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
         spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict,
         below_threshold_count=below_threshold_count, above_max_count=above_max_count,
-        starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio
+        starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio,
+        trail_atr=trail_atr
     )
     print(f"\n  HTML Report: {report_path}")
 

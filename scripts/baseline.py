@@ -129,18 +129,23 @@ def main():
                         help='Round-trip cost as %% of trade value (default: 0.25)')
     parser.add_argument('--rr-ratio', type=float, default=None,
                         help='Risk-reward ratio. If not set, uses regime-dependent defaults')
+    parser.add_argument('--trail-atr', type=float, default=0.0,
+                        help='Trailing stop distance in ATR units (0=off)')
     args = parser.parse_args()
 
     experiment = args.experiment_name
     starting_capital = args.capital
     risk_per_trade = args.risk_per_trade
     cost_model = args.cost_model
+    trail_atr = args.trail_atr
     csv_path = os.path.join(OUTPUT_DIR, 'baseline_raw.csv')
 
     print("=" * 74)
     print(f"  BASELINE REPORT — {len(BASELINE_DATES)} dates | Pipeline: factors + screener + forward check")
     if experiment != "default":
         print(f"  Experiment: {experiment}")
+    if trail_atr > 0:
+        print(f"  Trailing stop: {trail_atr}x ATR")
     print("=" * 74)
 
     all_trades = []          # list of dicts, one per trade
@@ -221,7 +226,8 @@ def main():
             try:
                 result, detail, stats = check_forward(
                     conn, s["symbol"], date_str,
-                    s["entry_price"], s["target_price"], s["stoploss"]
+                    s["entry_price"], s["target_price"], s["stoploss"],
+                    trail_atr=trail_atr
                 )
             except Exception as e:
                 # Log but don't crash; treat as DRAW with no data
@@ -246,7 +252,10 @@ def main():
             if shares == 0:
                 continue
             if result == "WIN":
-                exit_price = s["target_price"]
+                if stats.get("trail_triggered"):
+                    exit_price = stats["trail_exit_price"]
+                else:
+                    exit_price = s["target_price"]
             elif result == "LOSS":
                 exit_price = s["stoploss"]
             else:
@@ -281,6 +290,8 @@ def main():
                 "pnl_gross": round(pnl_gross, 2),
                 "pnl_net": round(pnl_net, 2),
                 "costs": round(costs, 2),
+                "trail_triggered": stats.get("trail_triggered"),
+                "trail_exit_price": stats.get("trail_exit_price"),
             }
             day_trades.append(trade)
             all_trades.append(trade)
@@ -409,8 +420,10 @@ def main():
           f"Wins: {total_wins} | Losses: {total_losses} | Draws: {total_draws}")
     print(f"  Win rate: {total_win_rate:.1f}% | Avg return: {total_avg_return:+.2f}% | "
           f"Total return: {total_return:+.2f}% | Avg hold days: {total_avg_hold:.1f}")
+    trail_count = sum(1 for t in all_trades if t.get("trail_triggered"))
+    trail_info = f" | Trail exits: {trail_count}" if trail_atr > 0 else ""
     print(f"  Net Return: {net_return_pct:+.2f}% | Final Capital: Rs{final_capital:,.0f} | "
-          f"Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1f}% | Costs: Rs{total_costs:,.0f}")
+          f"Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1f}% | Costs: Rs{total_costs:,.0f}{trail_info}")
 
     # ============================================================
     #  OUTPUT: CSV
