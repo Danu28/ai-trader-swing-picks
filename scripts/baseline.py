@@ -7,10 +7,10 @@ Usage:
 """
 
 # Baseline (auto-updated 2026-07-20):
-#   Overall: Win Rate=62.9%, Avg Return=+1.17%, Total Return=+81.96%
-#   risk_on:  Win Rate=60.0%, Total Return=+16.73%
-#   neutral:  Win Rate=63.2%, Total Return=+22.03%
-#   risk_off: Win Rate=63.9%, Total Return=+43.20%
+#   Overall: Win Rate=68.0%, Avg Return=+1.84%, Total Return=+91.96%
+#   risk_on:  Win Rate=66.7%, Total Return=+19.24%
+#   neutral:  Win Rate=55.6%, Total Return=+9.52%
+#   risk_off: Win Rate=80.0%, Total Return=+63.20%
 
 import sys
 import os
@@ -182,7 +182,7 @@ def main():
         if not ranked:
             below = screen_result.get("below_threshold", [])
             if below:
-                print(f"  {date_str}   {regime_label:<8}  All {len(below)} picks below threshold (score >= 70)")
+                print(f"  {date_str}   {regime_label:<8}  All {len(below)} picks below threshold (score 60-75)")
             else:
                 print(f"  {date_str}   {regime_label:<8}  No picks found")
             date_summaries.append({

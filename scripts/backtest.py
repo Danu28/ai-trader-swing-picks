@@ -118,7 +118,7 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
 
 def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
                            spike_label, spike_ratio, spike_blocked, rows, summary,
-                           below_threshold_count=0):
+                           below_threshold_count=0, above_max_count=0):
     """Generate standalone HTML backtest report matching reporter.py dark theme."""
     vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
     vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
@@ -142,7 +142,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
                 row_class = "result-draw"
                 result_color = "#d29922"
 
-            score_color = "#3fb950" if r["score"] >= 70 else "#c9d1d9"
+            score_color = "#3fb950" if 60 <= r["score"] <= 75 else "#c9d1d9"
             table_rows_html += f'''
         <tr class="{row_class}">
           <td class="rank">#{r["rank"]}</td>
@@ -193,7 +193,13 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(regime_label, "[--]")
     regime_display = regime_label.replace("_", " ").upper()
 
-    filter_info = f" &nbsp;|&nbsp; Score filter: &ge;70 ({below_threshold_count} filtered)" if below_threshold_count > 0 else ""
+    filter_parts = []
+    if below_threshold_count > 0:
+        filter_parts.append(f"{below_threshold_count} below min")
+    if above_max_count > 0:
+        filter_parts.append(f"{above_max_count} above max")
+    filtered_str = ", ".join(filter_parts)
+    filter_info = f" &nbsp;|&nbsp; Score range: 60&ndash;75 ({filtered_str} filtered)" if filtered_str else f" &nbsp;|&nbsp; Score range: 60&ndash;75"
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -313,7 +319,7 @@ def main():
         report_path = generate_backtest_html(
             as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
             spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None,
-            below_threshold_count=0
+            below_threshold_count=0, above_max_count=0
         )
         print(f"\n  HTML Report: {report_path}")
         return
@@ -333,14 +339,26 @@ def main():
 
     if not ranked:
         below_threshold_count = len(screen_result.get("below_threshold", []))
-        if below_threshold_count > 0:
-            print(f"  Score filter: >=70 | {below_threshold_count} picks below threshold filtered")
+        above_max_count = len(screen_result.get("above_max", []))
+        if below_threshold_count > 0 or above_max_count > 0:
+            parts = []
+            if below_threshold_count > 0:
+                parts.append(f"{below_threshold_count} below min")
+            if above_max_count > 0:
+                parts.append(f"{above_max_count} above max")
+            print(f"  Score range: 60-75 | {', '.join(parts)} filtered")
         print("      No picks found.")
         return
 
     below_threshold_count = len(screen_result.get("below_threshold", []))
-    if below_threshold_count > 0:
-        print(f"  Score filter: >=70 | {below_threshold_count} picks below threshold filtered")
+    above_max_count = len(screen_result.get("above_max", []))
+    if below_threshold_count > 0 or above_max_count > 0:
+        parts = []
+        if below_threshold_count > 0:
+            parts.append(f"{below_threshold_count} below min")
+        if above_max_count > 0:
+            parts.append(f"{above_max_count} above max")
+        print(f"  Score range: 60-75 | {', '.join(parts)} filtered")
 
     conn = sqlite3.connect(DB_PATH)
 
@@ -451,7 +469,7 @@ def main():
     report_path = generate_backtest_html(
         as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
         spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict,
-        below_threshold_count=below_threshold_count
+        below_threshold_count=below_threshold_count, above_max_count=above_max_count
     )
     print(f"\n  HTML Report: {report_path}")
 

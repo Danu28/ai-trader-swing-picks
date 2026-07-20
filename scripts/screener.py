@@ -187,21 +187,24 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
         if len(ranked) >= top_n:
             break
 
-    # Minimum composite score filter — drop picks below threshold
-    MIN_SCORE = 70
+    # Composite score range filter — drop picks outside [MIN_SCORE, MAX_SCORE]
+    MIN_SCORE = 60
+    MAX_SCORE = 75
     below_threshold = [s for s in ranked if s["composite"] < MIN_SCORE]
-    ranked = [s for s in ranked if s["composite"] >= MIN_SCORE]
+    above_max = [s for s in ranked if s["composite"] > MAX_SCORE]
+    ranked = [s for s in ranked if MIN_SCORE <= s["composite"] <= MAX_SCORE]
 
-    if below_threshold:
+    if below_threshold or above_max:
         if not ranked:
             log({"stage": "screen", "status": "warning",
-                 "warning": f"No picks above minimum score threshold ({MIN_SCORE})",
+                 "warning": f"No picks within score range ({MIN_SCORE}-{MAX_SCORE})",
                  "top_available": [f"{s['symbol']}={s['composite']:.1f}" for s in sorted(below_threshold, key=lambda x: x["composite"], reverse=True)[:5]],
                  "ts": datetime.now().isoformat()})
         else:
             log({"stage": "screen", "status": "info",
                  "filtered_below_min_score": len(below_threshold),
-                 "filtered": [f"{s['symbol']}={s['composite']:.1f}" for s in below_threshold],
+                 "filtered_above_max_score": len(above_max),
+                 "filtered": [f"{s['symbol']}={s['composite']:.1f}" for s in below_threshold + above_max],
                  "ts": datetime.now().isoformat()})
 
     for stock in ranked:
@@ -250,12 +253,13 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
              "sector_distribution": sector_dist,
              "rejected_count": len(rejected), "rejected": rejected,
              "below_threshold_count": len(below_threshold),
+             "above_max_count": len(above_max),
              "ts": datetime.now().isoformat()}
     log(entry)
 
     conn.close()
     return {"ranked": ranked, "rejected": rejected, "run_ts": run_ts,
-            "below_threshold": below_threshold}
+            "below_threshold": below_threshold, "above_max": above_max}
 
 
 if __name__ == '__main__':
