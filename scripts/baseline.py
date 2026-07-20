@@ -7,10 +7,10 @@ Usage:
 """
 
 # Baseline (auto-updated 2026-07-20):
-#   Overall: Win Rate=60.9%, Avg Return=+0.93%, Total Return=+59.78%
-#   risk_on:  Win Rate=53.3%, Total Return=+4.71%
-#   neutral:  Win Rate=58.8%, Total Return=+12.39%
-#   risk_off: Win Rate=65.6%, Total Return=+42.68%
+#   Overall: Win Rate=61.9%, Avg Return=+1.04%, Total Return=+65.25%
+#   risk_on:  Win Rate=50.0%, Total Return=+0.02%
+#   neutral:  Win Rate=63.2%, Total Return=+22.03%
+#   risk_off: Win Rate=63.9%, Total Return=+43.20%
 
 import sys
 import os

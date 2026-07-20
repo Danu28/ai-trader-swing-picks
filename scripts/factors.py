@@ -87,7 +87,7 @@ def compute_factors_for_symbol(conn, symbol, nifty50_close=None, as_of_date=None
 
     roc_21 = compute_roc(df, 'close', 21)
     roc_63 = compute_roc(df, 'close', 63)
-    momentum_price_raw = roc_21.iloc[-1] * roc_63.iloc[-1]
+    momentum_price_raw = (roc_21.iloc[-1] + roc_63.iloc[-1]) / 2
     momentum_price_raw = max(momentum_price_raw, -10000)
 
     vol_10 = volume.rolling(10).mean()
@@ -117,12 +117,7 @@ def compute_factors_for_symbol(conn, symbol, nifty50_close=None, as_of_date=None
 
     rsi = compute_rsi(df)
     rsi_value = rsi.iloc[-1]
-    if 40 <= rsi_value <= 60:
-        rsi_raw = 100
-    elif 30 <= rsi_value < 40 or 60 < rsi_value <= 70:
-        rsi_raw = 60
-    else:
-        rsi_raw = 20
+    rsi_raw = max(0, 100 - abs(rsi_value - 50) * 3)
 
     turnover = close * volume
     liquidity_raw = turnover.rolling(20).mean().iloc[-1]

@@ -10,9 +10,9 @@ import numpy as np
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'market_data.db')
 
 DEFAULT_WEIGHTS = {
-    "momentum": 0.35,
+    "momentum": 0.30,
     "trend_quality": 0.25,
-    "mean_reversion": 0.25,
+    "mean_reversion": 0.30,
     "quality": 0.15
 }
 
@@ -20,11 +20,11 @@ DEFAULT_WEIGHTS = {
 def auto_weights(regime_label):
     """Return regime-appropriate factor weights."""
     if regime_label == "risk_off":
-        return {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
+        return {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.35, "quality": 0.25}
     elif regime_label == "neutral":
-        return {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
+        return {"momentum": 0.25, "trend_quality": 0.25, "mean_reversion": 0.30, "quality": 0.20}
     else:  # risk_on or unknown
-        return {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
+        return {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.30, "quality": 0.15}
 
 
 def log(entry):
