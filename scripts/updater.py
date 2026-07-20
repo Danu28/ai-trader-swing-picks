@@ -15,8 +15,20 @@ def log(entry):
     sys.stdout.flush()
 
 
+def _next_weekday(dt):
+    while dt.weekday() >= 5:
+        dt += timedelta(days=1)
+    return dt
+
+
 def run(max_retries=3, retry_delay=5):
-    today = date.today().isoformat()
+    today_dt = date.today()
+    if today_dt.weekday() >= 5:
+        log({"stage": "update", "status": "skip", "reason": "weekend",
+             "ts": datetime.now().isoformat()})
+        return {"updated": 0, "skipped": 0, "errors": 0}
+
+    today = today_dt.isoformat()
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -47,11 +59,11 @@ def run(max_retries=3, retry_delay=5):
             try:
                 ticker = yf.Ticker(symbol)
                 if latest_date:
-                    start = (datetime.strptime(latest_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
-                    end = today
+                    start = _next_weekday(datetime.strptime(latest_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+                    end = (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 else:
                     start = "2016-01-01"
-                    end = today
+                    end = (datetime.strptime(today, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
                 df = ticker.history(start=start, end=end)
                 if df.empty:
