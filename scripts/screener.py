@@ -24,7 +24,8 @@ def auto_weights(regime_label):
     elif regime_label == "neutral":
         return {"momentum": 0.25, "trend_quality": 0.25, "mean_reversion": 0.30, "quality": 0.20}
     else:  # risk_on or unknown
-        return {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.30, "quality": 0.15}
+        # ponytail: risk_on uses M:0.45, MR:0.15 — MR weight cancelled momentum in bull markets
+        return {"momentum": 0.45, "trend_quality": 0.25, "mean_reversion": 0.15, "quality": 0.15}
 
 
 def log(entry):
@@ -117,6 +118,21 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
 
         if vol > 85:
             continue
+
+        # Skip stocks that fell >15% in 21 trading days (catching falling knife)
+        # ponytail: naive 21d return filter, no ATR normalization
+        close_now = c.execute(
+            "SELECT close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+            (symbol, today)
+        ).fetchone()
+        close_21d = c.execute(
+            "SELECT close FROM daily_ohlcv WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 21,1",
+            (symbol, today)
+        ).fetchone()
+        if close_now and close_21d and close_21d[0] > 0:
+            ret_21d = (close_now[0] / close_21d[0]) - 1
+            if ret_21d < -0.15:
+                continue
 
         momentum_cat = (mp + mv + rs) / 3.0
         trend_cat = (ta + ms) / 2.0

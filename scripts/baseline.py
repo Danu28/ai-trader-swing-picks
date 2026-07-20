@@ -7,8 +7,8 @@ Usage:
 """
 
 # Baseline (auto-updated 2026-07-20):
-#   Overall: Win Rate=61.9%, Avg Return=+1.04%, Total Return=+65.25%
-#   risk_on:  Win Rate=50.0%, Total Return=+0.02%
+#   Overall: Win Rate=62.9%, Avg Return=+1.17%, Total Return=+81.96%
+#   risk_on:  Win Rate=60.0%, Total Return=+16.73%
 #   neutral:  Win Rate=63.2%, Total Return=+22.03%
 #   risk_off: Win Rate=63.9%, Total Return=+43.20%
 
