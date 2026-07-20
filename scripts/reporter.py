@@ -23,82 +23,469 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
         fd = s.get("factor_detail", {})
         top_drivers = sorted(fd.items(), key=lambda x: x[1], reverse=True)[:2]
         drivers_str = ", ".join(f"{k}: {v:.0f}" for k, v in top_drivers)
+        score = s["composite"]
+        bar_color = "#FBBF24" if score < 65 else "#38BDF8" if score < 70 else "#4ADE80"
         picks_html += f'''
     <tr>
       <td class="rank">#{s["rank"]}</td>
-      <td><strong>{s["symbol"]}</strong><br><small>{s["sector"]}</small></td>
-      <td class="score">{s["composite"]:.1f}</td>
-      <td class="price">₹{s["entry_price"]:,.2f}</td>
-      <td class="price target">₹{s["target_price"]:,.2f}</td>
-      <td class="price stoploss">₹{s["stoploss"]:,.2f}</td>
-      <td><small>{drivers_str}</small></td>
+      <td class="symbol-cell"><strong>{s["symbol"]}</strong><br><span class="sector-label">{s["sector"]}</span></td>
+      <td class="score-cell">
+        <div class="score-bar-wrap">
+          <div class="score-bar"><div class="score-fill" style="width:{score}%;background:{bar_color};"></div></div>
+          <span class="score-num">{score:.1f}</span>
+        </div>
+      </td>
+      <td class="price-cell">₹{s["entry_price"]:,.2f}</td>
+      <td class="price-cell target">₹{s["target_price"]:,.2f}</td>
+      <td class="price-cell stoploss">₹{s["stoploss"]:,.2f}</td>
+      <td class="drivers-cell"><span class="drivers-text">{drivers_str}</span></td>
     </tr>'''
 
     regime_str = market_regime.get("regime", "unknown").replace("_", " ").title() if market_regime else "N/A"
+    regime_label = market_regime.get("regime", "unknown") if market_regime else "unknown"
     regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(
-        market_regime.get("regime", ""), "[--]") if market_regime else "[--]"
+        regime_label, "[--]")
+
+    nifty_trend = market_regime.get("nifty_trend", "N/A").title() if market_regime else "N/A"
+    scored = run_metadata.get("symbols_scored", "N/A")
+    freshness = run_metadata.get("data_freshness_pct", "N/A")
+    weights = run_metadata.get("weights_used", {})
+    picks_count = len(ranked)
 
     html = f'''<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Swing Picks — {today}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; }}
+  :root {{
+    --bg: #121314;
+    --bg-card: #1A1B1E;
+    --bg-card-hover: #1E1F22;
+    --bg-table: #1A1B1E;
+    --bg-table-alt: #1E1F22;
+    --bg-header: #222327;
+    --text-primary: #E2E8F0;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --border: #2A2B2D;
+    --accent-green: #4ADE80;
+    --accent-blue: #38BDF8;
+    --accent-amber: #FBBF24;
+    --accent-red: #EF4444;
+    --shadow: 0 4px 20px -2px rgba(0,0,0,0.4);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-heading: 'Playfair Display', Georgia, serif;
+    --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+    --transition: 0.2s ease;
+  }}
+  [data-theme="light"] {{
+    --bg: #F8FAFC;
+    --bg-card: #FFFFFF;
+    --bg-card-hover: #F1F5F9;
+    --bg-table: #FFFFFF;
+    --bg-table-alt: #F8FAFC;
+    --bg-header: #F1F5F9;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --shadow: 0 4px 20px -2px rgba(0,0,0,0.08);
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.6;
+    transition: background var(--transition), color var(--transition);
+  }}
   .container {{ max-width: 1100px; margin: 0 auto; }}
-  h1 {{ color: #58a6ff; font-size: 1.8em; margin-bottom: 4px; }}
-  .subtitle {{ color: #8b949e; margin-bottom: 24px; }}
-  .meta {{ display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }}
-  .meta-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 150px; }}
-  .meta-card .label {{ color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .meta-card .value {{ color: #c9d1d9; font-size: 1.2em; font-weight: 600; margin-top: 2px; }}
-  table {{ width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }}
-  th {{ background: #21262d; color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; }}
-  td {{ padding: 12px; border-top: 1px solid #21262d; }}
-  .rank {{ color: #58a6ff; font-weight: 700; font-size: 1.1em; }}
-  .score {{ color: #3fb950; font-weight: 600; font-size: 1.1em; }}
-  .price {{ font-family: 'JetBrains Mono', monospace; }}
-  .target {{ color: #3fb950; }}
-  .stoploss {{ color: #f85149; }}
-  .warnings {{ background: #1a1a0a; border: 1px solid #d29922; border-radius: 8px; padding: 16px; margin-top: 20px; }}
-  .warnings h3 {{ color: #d29922; margin-top: 0; }}
-  .warnings ul {{ margin: 0; padding-left: 20px; color: #e3b341; }}
-  .footer {{ color: #484f58; font-size: 0.75em; text-align: center; margin-top: 30px; }}
+  h1 {{
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 2rem;
+    margin: 0 0 2px;
+    letter-spacing: -0.02em;
+  }}
+  .subtitle {{ color: var(--text-secondary); margin: 0 0 4px; font-size: 0.9rem; }}
+
+  .header-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }}
+  .theme-toggle {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 1.1rem;
+    transition: all var(--transition);
+    flex-shrink: 0;
+  }}
+  .theme-toggle:hover {{ border-color: var(--text-muted); }}
+
+  .sub-header {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }}
+
+  /* Executive summary grid */
+  .exec-summary {{
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }}
+  .summary-main {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }}
+  .summary-main .regime-row {{
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }}
+  .market-details {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }}
+  .market-details .detail-item {{
+    display: flex;
+    flex-direction: column;
+  }}
+  .market-details .detail-label {{
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }}
+  .market-details .detail-value {{
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }}
+
+  .kpi-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }}
+  .kpi-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }}
+  .kpi-value {{
+    font-family: var(--font-heading);
+    font-size: 1.9rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }}
+  .kpi-label {{
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-top: 2px;
+  }}
+
+  /* Regime badges */
+  .regime-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }}
+  .badge-risk_on {{
+    background: rgba(74,222,128,0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(74,222,128,0.3);
+  }}
+  .badge-risk_off {{
+    background: rgba(239,68,68,0.12);
+    color: var(--accent-red);
+    border: 1px solid rgba(239,68,68,0.3);
+  }}
+  .badge-neutral, .badge-unknown {{
+    background: rgba(251,191,36,0.12);
+    color: var(--accent-amber);
+    border: 1px solid rgba(251,191,36,0.3);
+  }}
+
+  /* Table */
+  .table-wrap {{
+    background: var(--bg-table);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+  }}
+  table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+  thead th {{
+    background: var(--bg-header);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 10px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }}
+  thead th.th-right {{ text-align: right; }}
+  thead th.th-center {{ text-align: center; }}
+  tbody tr {{ border-bottom: 1px solid var(--border); transition: background var(--transition); }}
+  tbody tr:last-child {{ border-bottom: none; }}
+  tbody tr:hover {{ background: var(--bg-card-hover); }}
+  td {{
+    padding: 10px;
+    font-size: 0.85rem;
+    vertical-align: middle;
+  }}
+  td.td-numeric {{
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+  }}
+  td.td-centered {{ text-align: center; }}
+
+  .rank {{ color: var(--accent-blue); font-weight: 700; font-size: 1rem; }}
+  .symbol-cell strong {{ font-weight: 600; }}
+  .sector-label {{ color: var(--text-muted); font-size: 0.72rem; }}
+
+  .score-cell {{ width: 130px; }}
+  .score-bar-wrap {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }}
+  .score-bar {{
+    flex: 1;
+    height: 5px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    min-width: 40px;
+  }}
+  .score-fill {{
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+  }}
+  .score-num {{
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    min-width: 2.2em;
+    text-align: right;
+    font-weight: 600;
+  }}
+
+  .price-cell {{
+    font-family: var(--font-mono);
+    text-align: right;
+    font-size: 0.8rem;
+  }}
+  .price-cell.target {{ color: var(--accent-green); }}
+  .price-cell.stoploss {{ color: var(--accent-red); }}
+
+  .drivers-cell {{ font-size: 0.78rem; }}
+  .drivers-text {{ color: var(--text-secondary); }}
+
+  /* Notes box */
+  .notes-box {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+  }}
+  .notes-box h3 {{
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 10px;
+    color: var(--text-primary);
+  }}
+  .notes-box ul {{
+    margin: 0;
+    padding-left: 20px;
+    color: var(--text-secondary);
+    font-size: 0.83rem;
+    line-height: 1.7;
+  }}
+  .notes-box ul li {{ margin-bottom: 2px; }}
+
+  .footer {{
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 16px 0 8px;
+    border-top: 1px solid var(--border);
+  }}
+
+  @media (max-width: 768px) {{
+    body {{ padding: 12px; }}
+    h1 {{ font-size: 1.5rem; }}
+    .exec-summary {{ grid-template-columns: 1fr; }}
+    .kpi-grid {{ grid-template-columns: 1fr 1fr; }}
+    .table-wrap {{ overflow-x: auto; }}
+  }}
+  @media print {{
+    body {{ background: #fff; color: #000; padding: 0; }}
+    .theme-toggle {{ display: none; }}
+    .table-wrap, .kpi-card, .summary-main, .notes-box {{ box-shadow: none; border: 1px solid #ccc; }}
+  }}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>Swing Trade Picks</h1>
-  <p class="subtitle">{today} &nbsp;|&nbsp; Regime: {regime_emoji} {regime_str} &nbsp;|&nbsp; Universe: Nifty 50 + Midcap 150</p>
-
-  <div class="meta">
-    <div class="meta-card"><div class="label">Regime</div><div class="value">{regime_emoji} {regime_str}</div></div>
-    <div class="meta-card"><div class="label">Stocks Scored</div><div class="value">{run_metadata.get("symbols_scored", "N/A")}</div></div>
-    <div class="meta-card"><div class="label">Data Freshness</div><div class="value">{run_metadata.get("data_freshness_pct", "N/A")}%</div></div>
-    <div class="meta-card"><div class="label">Nifty Trend</div><div class="value">{market_regime.get("nifty_trend", "N/A").title() if market_regime else "N/A"}</div></div>
+  <div class="header-row">
+    <div>
+      <h1>Swing Trade Picks</h1>
+      <p class="subtitle">{today} — Universe: Nifty 50 + Midcap 150</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌙</button>
   </div>
 
-  <table>
-    <thead>
-      <tr><th>Rank</th><th>Symbol / Sector</th><th>Score</th><th>Entry</th><th>Target</th><th>Stoploss</th><th>Key Drivers</th></tr>
-    </thead>
-    <tbody>{picks_html}
-    </tbody>
-  </table>
+  <div class="sub-header">
+    <span class="regime-badge badge-{regime_label}">{regime_emoji} {regime_str}</span>
+    <span>Nifty Trend: <strong>{nifty_trend}</strong></span>
+    <span>Stocks Scored: <strong>{scored}</strong></span>
+    <span>Data Freshness: <strong>{freshness}%</strong></span>
+    <span>Top Picks: <strong>{picks_count}</strong></span>
+  </div>
 
-  <div class="warnings">
-    <h3>Notes & Warnings</h3>
+  <div class="exec-summary">
+    <div class="summary-main">
+      <div class="regime-row">
+        <span class="regime-badge badge-{regime_label}" style="font-size:0.9rem;">{regime_emoji} {regime_str}</span>
+      </div>
+      <div class="market-details">
+        <div class="detail-item">
+          <span class="detail-label">Nifty Trend</span>
+          <span class="detail-value">{nifty_trend}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Stocks Scored</span>
+          <span class="detail-value">{scored}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Data Freshness</span>
+          <span class="detail-value">{freshness}%</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Top Picks</span>
+          <span class="detail-value">{picks_count}</span>
+        </div>
+      </div>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:var(--accent-green);">{scored}</div>
+        <div class="kpi-label">Stocks Scored</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:{'var(--accent-green)' if isinstance(freshness, (int, float)) and freshness >= 80 else 'var(--accent-amber)'}">{freshness}%</div>
+        <div class="kpi-label">Data Freshness</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:var(--accent-blue);">{picks_count}</div>
+        <div class="kpi-label">Top Picks</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">{nifty_trend}</div>
+        <div class="kpi-label">Nifty Trend</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40px">Rank</th>
+          <th>Symbol / Sector</th>
+          <th style="width:140px">Score</th>
+          <th style="width:95px" class="th-right">Entry</th>
+          <th style="width:95px" class="th-right">Target</th>
+          <th style="width:95px" class="th-right">Stoploss</th>
+          <th>Key Drivers</th>
+        </tr>
+      </thead>
+      <tbody>{picks_html}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="notes-box">
+    <h3>Notes &amp; Warnings</h3>
     <ul>
       <li>All prices in INR. Entry/Target/Stoploss are algorithmic suggestions — use judgment.</li>
-      <li>Factor weights: Momentum {run_metadata.get("weights_used", {}).get("momentum", "N/A")}, Trend Quality {run_metadata.get("weights_used", {}).get("trend_quality", "N/A")}, Mean Reversion {run_metadata.get("weights_used", {}).get("mean_reversion", "N/A")}, Quality {run_metadata.get("weights_used", {}).get("quality", "N/A")}</li>
+      <li>Factor weights: Momentum {weights.get("momentum", "N/A")}, Trend Quality {weights.get("trend_quality", "N/A")}, Mean Reversion {weights.get("mean_reversion", "N/A")}, Quality {weights.get("quality", "N/A")}</li>
       <li>Max 2 stocks per sector enforced. Stocks filtered: liquidity &lt; 25th percentile excluded.</li>
       <li>This is not investment advice. Always verify with your own analysis.</li>
     </ul>
   </div>
 
-  <div class="footer">AI-Trader Swing Picks &bull; Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &bull; Pipeline v1.0</div>
+  <div class="footer">AI-Trader Swing Picks • Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} • Pipeline v1.0</div>
 </div>
+<script>
+(function() {{
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function() {{
+    var html = document.documentElement;
+    var isDark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    btn.textContent = isDark ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19';
+  }});
+}})();
+</script>
 </body>
 </html>'''
 

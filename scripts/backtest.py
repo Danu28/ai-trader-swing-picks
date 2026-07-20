@@ -119,9 +119,33 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
 def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
                            spike_label, spike_ratio, spike_blocked, rows, summary,
                            below_threshold_count=0, above_max_count=0):
-    """Generate standalone HTML backtest report matching reporter.py dark theme."""
+    """Generate standalone HTML backtest report with beautiful-reports design system."""
     vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
     vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
+    regime_display = regime_label.replace("_", " ").upper()
+    regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(regime_label, "[--]")
+
+    # KPI values
+    win_rate_str = f"{summary['win_rate']:.0f}%" if summary else "N/A"
+    total_return_str = f"{summary['total_return']:+.2f}%" if summary else "N/A"
+    avg_return_str = f"{summary['avg_return']:+.2f}%" if summary else "N/A"
+    avg_hold_str = f"{summary['avg_hold']:.1f}" if summary else "N/A"
+    wins = summary['wins'] if summary else 0
+    losses = summary['losses'] if summary else 0
+    draws = summary['draws'] if summary else 0
+    total_trades = wins + losses + draws
+    wins_pct = round(wins / total_trades * 100) if total_trades > 0 else 0
+    losses_pct = round(losses / total_trades * 100) if total_trades > 0 else 0
+    draws_pct = max(100 - wins_pct - losses_pct, 0) if total_trades > 0 else 0
+
+    # Filter info
+    filter_parts = []
+    if below_threshold_count > 0:
+        filter_parts.append(f"{below_threshold_count} below min")
+    if above_max_count > 0:
+        filter_parts.append(f"{above_max_count} above max")
+    filtered_str = ", ".join(filter_parts)
+    score_filter_info = f"Score range: 60–75" + (f" ({filtered_str} filtered)" if filtered_str else "")
 
     # Build table rows
     table_rows_html = ""
@@ -132,32 +156,31 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
             tgt_date_str = str(r["target_date"]) if r["target_date"] else "--"
             sl_date_str = str(r["sl_date"]) if r["sl_date"] else "--"
 
-            if r["result"] == "WIN":
-                row_class = "result-win"
-                result_color = "#3fb950"
-            elif r["result"] == "LOSS":
-                row_class = "result-loss"
-                result_color = "#f85149"
-            else:
-                row_class = "result-draw"
-                result_color = "#d29922"
+            result_lower = r["result"].lower()
+            score = r["score"]
+            # Score bar color gradient: amber < 65, blue 65-69, green >= 70
+            bar_color = "#FBBF24" if score < 65 else "#38BDF8" if score < 70 else "#4ADE80"
 
-            score_color = "#3fb950" if 60 <= r["score"] <= 75 else "#c9d1d9"
             table_rows_html += f'''
-        <tr class="{row_class}">
+        <tr class="result-{result_lower}">
           <td class="rank">#{r["rank"]}</td>
-          <td><strong>{r["symbol"]}</strong><br><small>{sec}</small></td>
-          <td style="text-align:right;color:{score_color};">{r["score"]:.1f}</td>
-          <td>{r["entry_date"]}</td>
-          <td class="price">₹{r["entry"]:,.2f}</td>
-          <td class="price target">₹{r["target"]:,.2f}</td>
-          <td class="price stoploss">₹{r["sl"]:,.2f}</td>
-          <td>{fill_char}</td>
-          <td style="color:{result_color};font-weight:600;">{r["result"]}</td>
-          <td style="color:{result_color};">{r["return_pct"]:+.2f}%</td>
-          <td>{r["hold_days"]}</td>
-          <td>{tgt_date_str}</td>
-          <td>{sl_date_str}</td>
+          <td class="symbol-cell"><strong>{r["symbol"]}</strong><br><span class="sector-label">{sec}</span></td>
+          <td class="score-cell">
+            <div class="score-bar-wrap">
+              <div class="score-bar"><div class="score-fill" style="width:{score}%;background:{bar_color};"></div></div>
+              <span class="score-num">{score:.1f}</span>
+            </div>
+          </td>
+          <td class="date-cell">{r["entry_date"]}</td>
+          <td class="price-cell">₹{r["entry"]:,.2f}</td>
+          <td class="price-cell target">₹{r["target"]:,.2f}</td>
+          <td class="price-cell stoploss">₹{r["sl"]:,.2f}</td>
+          <td class="td-centered">{fill_char}</td>
+          <td class="td-centered"><span class="result-badge {r["result"]}">{r["result"]}</span></td>
+          <td class="td-numeric return-cell {result_lower}">{r["return_pct"]:+.2f}%</td>
+          <td class="td-numeric">{r["hold_days"]}</td>
+          <td class="date-cell">{tgt_date_str}</td>
+          <td class="date-cell">{sl_date_str}</td>
         </tr>'''
 
     # Summary row
@@ -174,91 +197,547 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
         </td>
       </tr>'''
 
-    # Warning banner for spike-blocked case
+    # Warning for spike-blocked case
     warning_html = ""
     if spike_blocked:
         warning_html = f'''
-    <div class="warnings">
-      <h3>Volatility Spike Detected &mdash; No Trades Executed</h3>
+    <div class="warning-box">
+      <h3>⚠ Volatility Spike Detected — No Trades Executed</h3>
       <ul>
         <li>VIX proxy: {vix_proxy_str} | 20-day avg: {vix_20d_str} | Spike ratio: {spike_ratio:.2f}x</li>
-        <li>Skipping picks &mdash; high risk of stop-outs during regime transition.</li>
+        <li>Skipping picks — high risk of stop-outs during regime transition.</li>
         <li>No trades on {as_of_date}.</li>
       </ul>
     </div>'''
 
-    # Meta cards
-    win_rate_str = f"{summary['win_rate']:.0f}%" if summary else "N/A"
-    total_return_str = f"{summary['total_return']:+.2f}%" if summary else "N/A"
-    regime_emoji = {"risk_on": "[ON]", "risk_off": "[OFF]", "neutral": "[--]"}.get(regime_label, "[--]")
-    regime_display = regime_label.replace("_", " ").upper()
-
-    filter_parts = []
-    if below_threshold_count > 0:
-        filter_parts.append(f"{below_threshold_count} below min")
-    if above_max_count > 0:
-        filter_parts.append(f"{above_max_count} above max")
-    filtered_str = ", ".join(filter_parts)
-    filter_info = f" &nbsp;|&nbsp; Score range: 60&ndash;75 ({filtered_str} filtered)" if filtered_str else f" &nbsp;|&nbsp; Score range: 60&ndash;75"
+    table_section = "" if spike_blocked else f'''
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th>Symbol</th>
+          <th style="width:130px">Score</th>
+          <th>Date</th>
+          <th style="width:92px" class="th-right">Entry</th>
+          <th style="width:92px" class="th-right">Target</th>
+          <th style="width:92px" class="th-right">SL</th>
+          <th style="width:28px" class="th-center">F</th>
+          <th style="width:60px" class="th-center">Result</th>
+          <th style="width:78px" class="th-right">Ret%</th>
+          <th style="width:46px" class="th-right">Days</th>
+          <th>Tgt Hit</th>
+          <th>SL Hit</th>
+        </tr>
+      </thead>
+      <tbody>{table_rows_html}
+{summary_html}
+      </tbody>
+    </table>
+  </div>'''
 
     html = f'''<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Backtest Report &mdash; {as_of_date}</title>
+<title>Backtest Report — {as_of_date}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; }}
-  .container {{ max-width: 1200px; margin: 0 auto; }}
-  h1 {{ color: #58a6ff; font-size: 1.8em; margin-bottom: 4px; }}
-  .subtitle {{ color: #8b949e; margin-bottom: 24px; }}
-  .meta {{ display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }}
-  .meta-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 120px; }}
-  .meta-card .label {{ color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .meta-card .value {{ color: #c9d1d9; font-size: 1.2em; font-weight: 600; margin-top: 2px; }}
-  table {{ width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }}
-  th {{ background: #21262d; color: #8b949e; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 10px; text-align: left; }}
-  td {{ padding: 10px; border-top: 1px solid #21262d; font-size: 0.9em; }}
-  .rank {{ color: #58a6ff; font-weight: 700; }}
-  .price {{ font-family: 'JetBrains Mono', 'Consolas', monospace; }}
-  .target {{ color: #3fb950; }}
-  .stoploss {{ color: #f85149; }}
-  .result-win {{ background: rgba(63, 185, 80, 0.06); }}
-  .result-loss {{ background: rgba(248, 81, 73, 0.06); }}
-  .result-draw {{ background: rgba(210, 153, 34, 0.06); }}
-  .summary-row td {{ background: #21262d; color: #c9d1d9; font-size: 0.9em; padding: 12px; border-top: 2px solid #30363d; text-align: center; }}
-  .warnings {{ background: #1a1a0a; border: 1px solid #d29922; border-radius: 8px; padding: 16px; margin: 20px 0; }}
-  .warnings h3 {{ color: #d29922; margin-top: 0; }}
-  .warnings ul {{ margin: 0; padding-left: 20px; color: #e3b341; }}
-  .footer {{ color: #484f58; font-size: 0.75em; text-align: center; margin-top: 30px; }}
+  :root {{
+    --bg: #121314;
+    --bg-card: #1A1B1E;
+    --bg-card-hover: #1E1F22;
+    --bg-table: #1A1B1E;
+    --bg-table-alt: #1E1F22;
+    --bg-header: #222327;
+    --text-primary: #E2E8F0;
+    --text-secondary: #94A3B8;
+    --text-muted: #64748B;
+    --border: #2A2B2D;
+    --accent-green: #4ADE80;
+    --accent-blue: #38BDF8;
+    --accent-amber: #FBBF24;
+    --accent-red: #EF4444;
+    --shadow: 0 4px 20px -2px rgba(0,0,0,0.4);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-heading: 'Playfair Display', Georgia, serif;
+    --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+    --transition: 0.2s ease;
+  }}
+  [data-theme="light"] {{
+    --bg: #F8FAFC;
+    --bg-card: #FFFFFF;
+    --bg-card-hover: #F1F5F9;
+    --bg-table: #FFFFFF;
+    --bg-table-alt: #F8FAFC;
+    --bg-header: #F1F5F9;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+    --border: #E2E8F0;
+    --shadow: 0 4px 20px -2px rgba(0,0,0,0.08);
+    --accent-win-bg: rgba(74,222,128,0.10);
+    --accent-loss-bg: rgba(239,68,68,0.10);
+    --accent-draw-bg: rgba(251,191,36,0.10);
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.6;
+    transition: background var(--transition), color var(--transition);
+  }}
+  .container {{ max-width: 1280px; margin: 0 auto; }}
+  h1 {{
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 2rem;
+    margin: 0 0 2px;
+    letter-spacing: -0.02em;
+  }}
+  .subtitle {{ color: var(--text-secondary); margin: 0 0 4px; font-size: 0.9rem; }}
+
+  .header-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }}
+  .theme-toggle {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 1.1rem;
+    transition: all var(--transition);
+    flex-shrink: 0;
+  }}
+  .theme-toggle:hover {{ border-color: var(--text-muted); }}
+
+  .sub-header {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }}
+  .sub-header .filter-note {{ color: var(--text-muted); font-size: 0.8rem; }}
+
+  /* Warning box */
+  .warning-box {{
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.25);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  }}
+  .warning-box h3 {{
+    color: var(--accent-amber);
+    font-family: var(--font-sans);
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }}
+  .warning-box ul {{ margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 0.85rem; }}
+
+  /* Executive summary grid — asymmetric */
+  .exec-summary {{
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }}
+  .summary-main {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }}
+  .summary-main .regime-row {{
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }}
+  .market-details {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }}
+  .market-details .detail-item {{
+    display: flex;
+    flex-direction: column;
+  }}
+  .market-details .detail-label {{
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }}
+  .market-details .detail-value {{
+    font-size: 1.05rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }}
+
+  /* KPI grid — 2x2 */
+  .kpi-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }}
+  .kpi-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }}
+  .kpi-value {{
+    font-family: var(--font-heading);
+    font-size: 1.9rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }}
+  .kpi-label {{
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-top: 2px;
+  }}
+
+  /* Trade stats bar */
+  .trade-stats-bar {{
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+  }}
+  .trade-stat-item {{
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }}
+  .trade-stat-dot {{
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }}
+  .trade-stat-label {{ color: var(--text-secondary); }}
+  .trade-stat-count {{ font-weight: 700; }}
+  .dist-bar-wrap {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }}
+  .dist-bar {{
+    display: flex;
+    height: 14px;
+    border-radius: 7px;
+    overflow: hidden;
+    min-width: 100px;
+    background: var(--border);
+  }}
+
+  /* Regime badges */
+  .regime-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }}
+  .badge-risk_on {{
+    background: rgba(74,222,128,0.12);
+    color: var(--accent-green);
+    border: 1px solid rgba(74,222,128,0.3);
+  }}
+  .badge-risk_off {{
+    background: rgba(239,68,68,0.12);
+    color: var(--accent-red);
+    border: 1px solid rgba(239,68,68,0.3);
+  }}
+  .badge-neutral, .badge-unknown {{
+    background: rgba(251,191,36,0.12);
+    color: var(--accent-amber);
+    border: 1px solid rgba(251,191,36,0.3);
+  }}
+
+  /* Table */
+  .table-wrap {{
+    background: var(--bg-table);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+  }}
+  table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+  thead th {{
+    background: var(--bg-header);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 10px 8px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }}
+  thead th.th-right {{ text-align: right; }}
+  thead th.th-center {{ text-align: center; }}
+  tbody tr {{ border-bottom: 1px solid var(--border); }}
+  tbody tr:last-child {{ border-bottom: none; }}
+  tbody tr.result-win {{ background: rgba(74,222,128,0.03); }}
+  tbody tr.result-loss {{ background: rgba(239,68,68,0.03); }}
+  tbody tr.result-draw {{ background: rgba(251,191,36,0.03); }}
+  tbody tr:hover {{ background: var(--bg-card-hover); }}
+  td {{
+    padding: 8px;
+    font-size: 0.83rem;
+    vertical-align: middle;
+  }}
+  td.td-numeric {{
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+  }}
+  td.td-centered {{ text-align: center; }}
+
+  .rank {{ color: var(--accent-blue); font-weight: 700; }}
+  .symbol-cell strong {{ font-weight: 600; }}
+  .sector-label {{ color: var(--text-muted); font-size: 0.72rem; }}
+
+  .score-cell {{ width: 120px; }}
+  .score-bar-wrap {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }}
+  .score-bar {{
+    flex: 1;
+    height: 5px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    min-width: 36px;
+  }}
+  .score-fill {{
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s ease;
+  }}
+  .score-num {{
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    min-width: 2.2em;
+    text-align: right;
+    font-weight: 600;
+  }}
+
+  .price-cell {{
+    font-family: var(--font-mono);
+    text-align: right;
+    font-size: 0.78rem;
+  }}
+  .price-cell.target {{ color: var(--accent-green); }}
+  .price-cell.stoploss {{ color: var(--accent-red); }}
+  .date-cell {{ font-size: 0.78rem; color: var(--text-secondary); }}
+
+  .result-badge {{
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }}
+  .result-badge.WIN {{ background: rgba(74,222,128,0.15); color: var(--accent-green); }}
+  .result-badge.LOSS {{ background: rgba(239,68,68,0.15); color: var(--accent-red); }}
+  .result-badge.DRAW {{ background: rgba(251,191,36,0.15); color: var(--accent-amber); }}
+  .return-cell.win {{ color: var(--accent-green); }}
+  .return-cell.loss {{ color: var(--accent-red); }}
+  .return-cell.draw {{ color: var(--accent-amber); }}
+
+  .summary-row td {{
+    background: var(--bg-header);
+    border-top: 2px solid var(--border);
+    padding: 12px 16px;
+    text-align: center;
+    font-size: 0.85rem;
+  }}
+
+  .footer {{
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 16px 0 8px;
+    border-top: 1px solid var(--border);
+  }}
+
+  @media (max-width: 768px) {{
+    body {{ padding: 12px; }}
+    h1 {{ font-size: 1.5rem; }}
+    .exec-summary {{ grid-template-columns: 1fr; }}
+    .kpi-grid {{ grid-template-columns: 1fr 1fr; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .dist-bar-wrap {{ margin-left: 0; }}
+  }}
+  @media print {{
+    body {{ background: #fff; color: #000; padding: 0; }}
+    .theme-toggle {{ display: none; }}
+    .table-wrap, .kpi-card, .summary-main, .trade-stats-bar, .warning-box {{ box-shadow: none; border: 1px solid #ccc; }}
+  }}
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>Backtest Report</h1>
-  <p class="subtitle">{as_of_date} &nbsp;|&nbsp; Regime: {regime_emoji} {regime_display} &nbsp;|&nbsp; VIX: {vix_proxy_str}/{vix_20d_str} &nbsp;|&nbsp; {spike_label} &nbsp;|&nbsp; R:R 1:1{filter_info}</p>
-
-  <div class="meta">
-    <div class="meta-card"><div class="label">Regime</div><div class="value">{regime_emoji} {regime_display}</div></div>
-    <div class="meta-card"><div class="label">Breadth</div><div class="value">{breadth}</div></div>
-    <div class="meta-card"><div class="label">VIX Proxy</div><div class="value">{vix_proxy_str}</div></div>
-    <div class="meta-card"><div class="label">VIX 20d Avg</div><div class="value">{vix_20d_str}</div></div>
-    <div class="meta-card"><div class="label">Win Rate</div><div class="value">{win_rate_str}</div></div>
-    <div class="meta-card"><div class="label">Total Return</div><div class="value">{total_return_str}</div></div>
-    <div class="meta-card"><div class="label">R:R</div><div class="value">1:1</div></div>
+  <div class="header-row">
+    <div>
+      <h1>Backtest Report</h1>
+      <p class="subtitle">{as_of_date}</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">🌙</button>
   </div>
-{warning_html}
-{f'''  <table>
-    <thead>
-       <tr><th>#</th><th>Symbol</th><th>Score</th><th>Date</th><th>Entry</th><th>Target</th><th>SL</th><th>F</th><th>Result</th><th>Ret%</th><th>Days</th><th>Tgt Hit</th><th>SL Hit</th></tr>
-    </thead>
-    <tbody>{table_rows_html}
-{summary_html}
-    </tbody>
-  </table>''' if not spike_blocked else ''}
 
-  <div class="footer">AI-Trader Swing Picks &mdash; Backtest &bull; Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} &bull; Pipeline v1.0</div>
+  <div class="sub-header">
+    <span class="regime-badge badge-{regime_label}">{regime_emoji} {regime_display}</span>
+    <span>Breadth: <strong>{breadth}</strong></span>
+    <span>VIX: <strong>{vix_proxy_str}</strong> | 20d Avg: <strong>{vix_20d_str}</strong></span>
+    <span>{spike_label}</span>
+    <span>R:R 1:1</span>
+    <span class="filter-note">{score_filter_info}</span>
+  </div>
+
+  {warning_html}
+
+  <div class="exec-summary">
+    <div class="summary-main">
+      <div class="regime-row">
+        <span class="regime-badge badge-{regime_label}" style="font-size:0.9rem;">{regime_emoji} {regime_display}</span>
+      </div>
+      <div class="market-details">
+        <div class="detail-item">
+          <span class="detail-label">Breadth Ratio</span>
+          <span class="detail-value">{breadth}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">VIX Proxy</span>
+          <span class="detail-value">{vix_proxy_str}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">VIX 20d Avg</span>
+          <span class="detail-value">{vix_20d_str}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Spike Status</span>
+          <span class="detail-value">{spike_label}</span>
+        </div>
+      </div>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:{'var(--accent-green)' if summary and summary['win_rate'] >= 50 else 'var(--accent-red)' if summary else 'var(--text-primary)'}">{win_rate_str}</div>
+        <div class="kpi-label">Win Rate</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:{'var(--accent-green)' if summary and summary['total_return'] >= 0 else 'var(--accent-red)' if summary else 'var(--text-primary)'}">{total_return_str}</div>
+        <div class="kpi-label">Total Return</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">{avg_return_str}</div>
+        <div class="kpi-label">Avg Return / Trade</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">{avg_hold_str}</div>
+        <div class="kpi-label">Avg Hold Days</div>
+      </div>
+    </div>
+  </div>
+
+  {f'''
+  <div class="trade-stats-bar">
+    <div class="trade-stat-item">
+      <span class="trade-stat-dot" style="background:var(--accent-green);"></span>
+      <span class="trade-stat-label">Wins:</span>
+      <span class="trade-stat-count" style="color:var(--accent-green);">{wins}</span>
+    </div>
+    <div class="trade-stat-item">
+      <span class="trade-stat-dot" style="background:var(--accent-red);"></span>
+      <span class="trade-stat-label">Losses:</span>
+      <span class="trade-stat-count" style="color:var(--accent-red);">{losses}</span>
+    </div>
+    <div class="trade-stat-item">
+      <span class="trade-stat-dot" style="background:var(--accent-amber);"></span>
+      <span class="trade-stat-label">Draws:</span>
+      <span class="trade-stat-count" style="color:var(--accent-amber);">{draws}</span>
+    </div>
+    <div class="dist-bar-wrap">
+      <span style="font-size:0.73rem;color:var(--text-muted);">W/L/D</span>
+      <div class="dist-bar">
+        <div style="flex:{max(wins_pct,1)};background:var(--accent-green);"></div>
+        <div style="flex:{max(losses_pct,1)};background:var(--accent-red);"></div>
+        <div style="flex:{max(draws_pct,1)};background:var(--accent-amber);"></div>
+      </div>
+    </div>
+  </div>''' if summary else ''}
+
+  {table_section}
+
+  <div class="footer">AI-Trader Swing Picks — Backtest • Generated {datetime.now().strftime("%Y-%m-%d %H:%M")} • Pipeline v1.0</div>
 </div>
+<script>
+(function() {{
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function() {{
+    var html = document.documentElement;
+    var isDark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    btn.textContent = isDark ? '\\u2600\\uFE0F' : '\\uD83C\\uDF19';
+  }});
+}})();
+</script>
 </body>
 </html>'''
 
