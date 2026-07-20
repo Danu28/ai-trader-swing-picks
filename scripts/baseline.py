@@ -7,9 +7,9 @@ Usage:
 """
 
 # Baseline (auto-updated 2026-07-20):
-#   Overall: Win Rate=68.0%, Avg Return=+1.84%, Total Return=+91.96%
-#   risk_on:  Win Rate=66.7%, Total Return=+19.24%
-#   neutral:  Win Rate=55.6%, Total Return=+9.52%
+#   Overall: Win Rate=64.0%, Net Return=+20.67%, Final Capital=Rs603,336, Sharpe=6.49, Max DD=4.2%
+#   risk_on:  Win Rate=50.0%, Total Return=+15.23%
+#   neutral:  Win Rate=55.6%, Total Return=+30.05%
 #   risk_off: Win Rate=80.0%, Total Return=+63.20%
 
 import sys
@@ -18,13 +18,14 @@ import sqlite3
 import csv
 import argparse
 import contextlib
+import statistics
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from factors import run as run_factors, VIX_SPIKE_THRESHOLD
 from screener import run as run_screener, auto_weights
-from backtest import check_forward, DB_PATH, OUTPUT_DIR
+from backtest import check_forward, DB_PATH, OUTPUT_DIR, compute_position, RR_REGIME_MAP
 
 BASELINE_DATES = [
     "2024-02-15",  # risk_on
@@ -82,9 +83,13 @@ def compute_hold_days(stats, result):
 def update_baseline_comment(script_path, overall, by_regime):
     """Update the baseline values comment at the top of this script file."""
     today_str = datetime.now().strftime("%Y-%m-%d")
+    net_ret = overall.get('net_return_pct', overall['total_return'])
+    fin_cap = overall.get('final_capital', 0)
+    shrp = overall.get('sharpe', 0)
+    mdd = overall.get('max_drawdown', 0)
     lines = [
         f"# Baseline (auto-updated {today_str}):",
-        f"#   Overall: Win Rate={overall['win_rate']:.1f}%, Avg Return={overall['avg_return']:+.2f}%, Total Return={overall['total_return']:+.2f}%",
+        f"#   Overall: Win Rate={overall['win_rate']:.1f}%, Net Return={net_ret:+.2f}%, Final Capital=Rs{fin_cap:,.0f}, Sharpe={shrp:.2f}, Max DD={mdd:.1f}%",
     ]
     for regime in ["risk_on", "neutral", "risk_off"]:
         b = by_regime.get(regime)
@@ -116,9 +121,20 @@ def main():
     parser = argparse.ArgumentParser(description="Swing-picks baseline performance measurement")
     parser.add_argument('--experiment-name', type=str, default='default',
                         help='Name for this experiment run (default: default)')
+    parser.add_argument('--capital', type=float, default=500000,
+                        help='Starting capital in INR (default: 500000)')
+    parser.add_argument('--risk-per-trade', type=float, default=1.0,
+                        help='Risk per trade as %% of capital (default: 1.0)')
+    parser.add_argument('--cost-model', type=float, default=0.25,
+                        help='Round-trip cost as %% of trade value (default: 0.25)')
+    parser.add_argument('--rr-ratio', type=float, default=None,
+                        help='Risk-reward ratio. If not set, uses regime-dependent defaults')
     args = parser.parse_args()
 
     experiment = args.experiment_name
+    starting_capital = args.capital
+    risk_per_trade = args.risk_per_trade
+    cost_model = args.cost_model
     csv_path = os.path.join(OUTPUT_DIR, 'baseline_raw.csv')
 
     print("=" * 74)
@@ -129,6 +145,8 @@ def main():
 
     all_trades = []          # list of dicts, one per trade
     date_summaries = []      # list of dicts, one per date
+    capital = starting_capital
+    equity_curve = [capital]
 
     for date_str in BASELINE_DATES:
         # --- Stage 1: Factors ---
@@ -165,10 +183,14 @@ def main():
             continue
 
         # --- Stage 2: Screener with auto regime weights ---
+        if args.rr_ratio is not None:
+            rr_ratio = args.rr_ratio
+        else:
+            rr_ratio = RR_REGIME_MAP.get(regime_label, 1.5)
         weights = auto_weights(regime_label)
         with suppress_stdout():
             try:
-                screen_result = run_screener(top_n=5, weights=weights, as_of_date=date_str)
+                screen_result = run_screener(top_n=5, weights=weights, as_of_date=date_str, rr_ratio=rr_ratio)
             except Exception as e:
                 print(f"\n{YELLOW}{date_str}  ERROR in screener: {e}{RESET}")
                 date_summaries.append({
@@ -219,6 +241,22 @@ def main():
             )
             hold_days = compute_hold_days(stats, result)
 
+            # Position sizing and P&L — skip if unaffordable
+            shares, position_value = compute_position(capital, risk_per_trade, s["entry_price"], s["stoploss"])
+            if shares == 0:
+                continue
+            if result == "WIN":
+                exit_price = s["target_price"]
+            elif result == "LOSS":
+                exit_price = s["stoploss"]
+            else:
+                exit_price = stats["end_close"]
+            pnl_gross = shares * (exit_price - s["entry_price"])
+            costs = (s["entry_price"] * shares + exit_price * shares) * (cost_model / 200)
+            pnl_net = pnl_gross - costs
+            capital += pnl_net
+            equity_curve.append(capital)
+
             trade = {
                 "experiment": experiment,
                 "date": date_str,
@@ -238,6 +276,11 @@ def main():
                 "hit_target_date": stats.get("hit_target_date") or "",
                 "hit_sl_date": stats.get("hit_sl_date") or "",
                 "detail": detail,
+                "shares": shares,
+                "position_value": round(position_value, 2),
+                "pnl_gross": round(pnl_gross, 2),
+                "pnl_net": round(pnl_net, 2),
+                "costs": round(costs, 2),
             }
             day_trades.append(trade)
             all_trades.append(trade)
@@ -344,6 +387,21 @@ def main():
     total_win_rate = total_wins / total_trades * 100 if total_trades > 0 else 0.0
     total_hold = sum(t["hold_days"] for t in all_trades)
     total_avg_hold = total_hold / total_trades if total_trades > 0 else 0.0
+    total_costs = sum(t.get("costs", 0) for t in all_trades)
+    final_capital = equity_curve[-1] if equity_curve else starting_capital
+    net_return_pct = (final_capital - starting_capital) / starting_capital * 100
+    trade_returns = [t["return_pct"] for t in all_trades if t["return_pct"] != 0] if all_trades else [0]
+    sharpe = 0.0
+    if len(trade_returns) > 1 and statistics.stdev(trade_returns) > 0:
+        sharpe = round((252 ** 0.5) * statistics.mean(trade_returns) / statistics.stdev(trade_returns), 2)
+    max_dd = 0.0
+    peak = equity_curve[0]
+    for val in equity_curve:
+        if val > peak:
+            peak = val
+        dd = (peak - val) / peak * 100
+        if dd > max_dd:
+            max_dd = dd
 
     print()
     print(f"  --- OVERALL ---")
@@ -351,6 +409,8 @@ def main():
           f"Wins: {total_wins} | Losses: {total_losses} | Draws: {total_draws}")
     print(f"  Win rate: {total_win_rate:.1f}% | Avg return: {total_avg_return:+.2f}% | "
           f"Total return: {total_return:+.2f}% | Avg hold days: {total_avg_hold:.1f}")
+    print(f"  Net Return: {net_return_pct:+.2f}% | Final Capital: Rs{final_capital:,.0f} | "
+          f"Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1f}% | Costs: Rs{total_costs:,.0f}")
 
     # ============================================================
     #  OUTPUT: CSV
@@ -377,6 +437,11 @@ def main():
         "win_rate": total_win_rate,
         "avg_return": total_avg_return,
         "total_return": total_return,
+        "net_return_pct": round(net_return_pct, 2),
+        "final_capital": round(final_capital, 2),
+        "sharpe": sharpe,
+        "max_drawdown": round(max_dd, 2),
+        "total_costs": round(total_costs, 2),
     }
     by_regime_stats = {}
     for regime_label in ["risk_on", "neutral", "risk_off"]:

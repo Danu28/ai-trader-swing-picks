@@ -2,6 +2,7 @@ import sys
 import os
 import sqlite3
 import json
+import statistics
 from datetime import datetime, date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -118,7 +119,8 @@ def check_forward(conn, symbol, as_of_date, entry_price, target_price, stoploss)
 
 def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
                            spike_label, spike_ratio, spike_blocked, rows, summary,
-                           below_threshold_count=0, above_max_count=0):
+                           below_threshold_count=0, above_max_count=0,
+                           starting_capital=500000, cost_model=0.25, rr_ratio=1.5):
     """Generate standalone HTML backtest report with beautiful-reports design system."""
     vix_proxy_str = f"{vix_proxy:.2f}" if vix_proxy is not None else "N/A"
     vix_20d_str = f"{vix_20d_avg:.2f}" if vix_20d_avg is not None else "N/A"
@@ -128,6 +130,10 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     # KPI values
     win_rate_str = f"{summary['win_rate']:.0f}%" if summary else "N/A"
     total_return_str = f"{summary['total_return']:+.2f}%" if summary else "N/A"
+    net_return_str = f"{summary['total_return_pct']:+.2f}%" if summary and 'total_return_pct' in summary else total_return_str
+    final_capital_str = f"₹{summary['final_capital']:,.0f}" if summary and 'final_capital' in summary else "N/A"
+    sharpe_str = f"{summary['sharpe']:.2f}" if summary and 'sharpe' in summary else "N/A"
+    max_dd_str = f"{summary['max_drawdown']:.1f}%" if summary and 'max_drawdown' in summary else "N/A"
     avg_return_str = f"{summary['avg_return']:+.2f}%" if summary else "N/A"
     avg_hold_str = f"{summary['avg_hold']:.1f}" if summary else "N/A"
     wins = summary['wins'] if summary else 0
@@ -173,6 +179,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
           </td>
           <td class="date-cell">{r["entry_date"]}</td>
           <td class="price-cell">₹{r["entry"]:,.2f}</td>
+          <td class="td-numeric">{r["shares"]}</td>
           <td class="price-cell target">₹{r["target"]:,.2f}</td>
           <td class="price-cell stoploss">₹{r["sl"]:,.2f}</td>
           <td class="td-centered">{fill_char}</td>
@@ -186,14 +193,22 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     # Summary row
     summary_html = ""
     if summary:
+        net_ret = summary.get("total_return_pct", summary["total_return"])
+        fin_cap = summary.get("final_capital", 0)
+        shrp = summary.get("sharpe", 0)
+        mdd = summary.get("max_drawdown", 0)
+        costs_total = summary.get("total_costs", 0)
         summary_html = f'''
       <tr class="summary-row">
-        <td colspan="13">
-          <strong>Total Return: {summary["total_return"]:+.2f}%</strong> &nbsp;|&nbsp;
-          Avg Return: {summary["avg_return"]:+.2f}% &nbsp;|&nbsp;
+        <td colspan="14">
+          <strong>Net Return: {net_ret:+.2f}%</strong> &nbsp;|&nbsp;
+          Final Capital: ₹{fin_cap:,.0f} &nbsp;|&nbsp;
+          Sharpe: {shrp:.2f} &nbsp;|&nbsp;
+          Max DD: {mdd:.1f}% &nbsp;|&nbsp;
           Win Rate: {summary["win_rate"]:.0f}% &nbsp;|&nbsp;
-          Avg Hold Days: {summary["avg_hold"]:.1f} &nbsp;|&nbsp;
-          Wins: {summary["wins"]} &nbsp;|&nbsp; Losses: {summary["losses"]} &nbsp;|&nbsp; Draws: {summary["draws"]}
+          Avg Hold: {summary["avg_hold"]:.1f}d &nbsp;|&nbsp;
+          Costs: ₹{costs_total:,.0f} &nbsp;|&nbsp;
+          W:{summary["wins"]} L:{summary["losses"]} D:{summary["draws"]}
         </td>
       </tr>'''
 
@@ -220,6 +235,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
           <th style="width:130px">Score</th>
           <th>Date</th>
           <th style="width:92px" class="th-right">Entry</th>
+          <th style="width:60px" class="th-right">Shares</th>
           <th style="width:92px" class="th-right">Target</th>
           <th style="width:92px" class="th-right">SL</th>
           <th style="width:28px" class="th-center">F</th>
@@ -645,7 +661,7 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     <span>Breadth: <strong>{breadth}</strong></span>
     <span>VIX: <strong>{vix_proxy_str}</strong> | 20d Avg: <strong>{vix_20d_str}</strong></span>
     <span>{spike_label}</span>
-    <span>R:R 1:1</span>
+    <span>R:R {rr_ratio}:1 | Capital: ₹{starting_capital:,.0f} | Cost: {cost_model}%</span>
     <span class="filter-note">{score_filter_info}</span>
   </div>
 
@@ -681,16 +697,16 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
         <div class="kpi-label">Win Rate</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value" style="color:{'var(--accent-green)' if summary and summary['total_return'] >= 0 else 'var(--accent-red)' if summary else 'var(--text-primary)'}">{total_return_str}</div>
-        <div class="kpi-label">Total Return</div>
+        <div class="kpi-value" style="color:{'var(--accent-green)' if summary and summary.get('total_return_pct', summary.get('total_return', 0)) >= 0 else 'var(--accent-red)' if summary else 'var(--text-primary)'}">{net_return_str}</div>
+        <div class="kpi-label">Net Return (after costs)</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value">{avg_return_str}</div>
-        <div class="kpi-label">Avg Return / Trade</div>
+        <div class="kpi-value" style="font-size:1.5rem;">{final_capital_str}</div>
+        <div class="kpi-label">Final Capital</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value">{avg_hold_str}</div>
-        <div class="kpi-label">Avg Hold Days</div>
+        <div class="kpi-value">{sharpe_str}</div>
+        <div class="kpi-label">Sharpe Ratio</div>
       </div>
     </div>
   </div>
@@ -748,6 +764,27 @@ def generate_backtest_html(as_of_date, regime_label, breadth, vix_proxy, vix_20d
     return report_path
 
 
+RR_REGIME_MAP = {
+    "risk_on": 1.5,
+    "neutral": 1.5,
+    "risk_off": 1.0,
+}
+
+
+def compute_position(capital, risk_pct, entry_price, stoploss):
+    risk_amount = capital * (risk_pct / 100)
+    risk_per_share = abs(entry_price - stoploss)
+    if risk_per_share <= 0:
+        return 0, 0
+    shares = int(risk_amount / risk_per_share)
+    position_value = shares * entry_price
+    max_allowed = capital * 0.25
+    if position_value > max_allowed:
+        shares = int(max_allowed / entry_price)
+        position_value = shares * entry_price
+    return shares, position_value
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -756,10 +793,21 @@ def main():
     parser.add_argument('--weights', type=str, default=None)
     parser.add_argument('--no-regime-gate', action='store_true',
                         help='Skip regime-based weight override; use default weights')
+    parser.add_argument('--capital', type=float, default=500000,
+                        help='Starting capital in INR (default: 500000)')
+    parser.add_argument('--risk-per-trade', type=float, default=1.0,
+                        help='Risk per trade as %% of capital (default: 1.0)')
+    parser.add_argument('--cost-model', type=float, default=0.25,
+                        help='Round-trip cost as %% of trade value (default: 0.25)')
+    parser.add_argument('--rr-ratio', type=float, default=None,
+                        help='Risk-reward ratio. If not set, uses regime-dependent defaults')
     args = parser.parse_args()
 
     as_of_date = args.as_of
     top_n = args.top
+    starting_capital = args.capital
+    risk_per_trade = args.risk_per_trade
+    cost_model = args.cost_model
 
     print(f"\n[1/3] Computing factors as of {as_of_date}...")
     factor_result = run_factors(as_of_date=as_of_date)
@@ -770,6 +818,12 @@ def main():
     vix_proxy = regime.get('vix_proxy') if regime else None
     vix_20d_avg = regime.get('vix_20d_avg') if regime else None
 
+    # Determine effective R:R ratio
+    if args.rr_ratio is not None:
+        rr_ratio = args.rr_ratio
+    else:
+        rr_ratio = RR_REGIME_MAP.get(regime_label, 1.5)
+
     # Compute spike ratio before header
     spike_ratio = None
     spike_label = "No spike"
@@ -778,7 +832,7 @@ def main():
         if spike_ratio > 1.5:
             spike_label = "!! SPIKE BLOCKED"
 
-    header = f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | VIX: {vix_proxy}/{vix_20d_avg} | {spike_label} | R:R 1:1"
+    header = f"  BACKTEST -- As-of: {as_of_date} | Regime: {regime_label.replace('_',' ').upper()} | VIX: {vix_proxy}/{vix_20d_avg} | {spike_label} | R:R {rr_ratio}:1"
     sep = "=" * len(header)
     print(sep)
     print(header)
@@ -798,7 +852,8 @@ def main():
         report_path = generate_backtest_html(
             as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
             spike_label, spike_ratio, spike_blocked=True, rows=[], summary=None,
-            below_threshold_count=0, above_max_count=0
+            below_threshold_count=0, above_max_count=0,
+            starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio
         )
         print(f"\n  HTML Report: {report_path}")
         return
@@ -813,7 +868,7 @@ def main():
     else:
         weights = auto_weights(regime_label)
 
-    screen_result = run_screener(top_n=top_n, weights=weights, as_of_date=as_of_date)
+    screen_result = run_screener(top_n=top_n, weights=weights, as_of_date=as_of_date, rr_ratio=rr_ratio)
     ranked = screen_result["ranked"]
 
     if not ranked:
@@ -841,6 +896,9 @@ def main():
 
     conn = sqlite3.connect(DB_PATH)
 
+    capital = starting_capital
+    equity_curve = [capital]
+
     rows = []
     for s in ranked:
         result, detail, stats = check_forward(
@@ -848,13 +906,33 @@ def main():
             s["entry_price"], s["target_price"], s["stoploss"]
         )
 
-        # Compute actual return %
+        # Compute position size — skip if can't afford even 1 share
+        shares, position_value = compute_position(capital, risk_per_trade, s["entry_price"], s["stoploss"])
+        if shares == 0:
+            entry_skip = {"stage": "backtest", "symbol": s["symbol"], "action": "skipped",
+                          "reason": "affordability", "entry_price": s["entry_price"],
+                          "capital": round(capital, 2), "ts": datetime.now().isoformat()}
+            print(json.dumps(entry_skip))
+            continue
+
+        # Determine exit price and compute P&L
         if result == "WIN":
+            exit_price = s["target_price"]
             return_pct = round((s["target_price"] - s["entry_price"]) / s["entry_price"] * 100, 2)
         elif result == "LOSS":
+            exit_price = s["stoploss"]
             return_pct = round((s["stoploss"] - s["entry_price"]) / s["entry_price"] * 100, 2)
         else:
+            exit_price = stats["end_close"]
             return_pct = round((stats["end_close"] - s["entry_price"]) / s["entry_price"] * 100, 2)
+
+        # Compute P&L and costs
+        pnl_gross = shares * (exit_price - s["entry_price"])
+        costs = (s["entry_price"] * shares + exit_price * shares) * (cost_model / 200)
+        pnl_net = pnl_gross - costs
+
+        capital += pnl_net
+        equity_curve.append(capital)
 
         # Compute hold days
         try:
@@ -883,7 +961,13 @@ def main():
             "sl": s["stoploss"],
             "result": result,
             "return_pct": return_pct,
-            "hold_days": hold_days
+            "hold_days": hold_days,
+            "shares": shares,
+            "position_value": round(position_value, 2),
+            "pnl_gross": round(pnl_gross, 2),
+            "pnl_net": round(pnl_net, 2),
+            "costs": round(costs, 2),
+            "capital_after": round(capital, 2),
         })
 
     conn.close()
@@ -897,7 +981,7 @@ def main():
 
     # Build table
     hdr = (f"{'#':<3}  {'Symbol':<14}  {'Score':>5}  {'Sector':<8}  {'Date':<10}  "
-           f"{'Entry':>8}  {'Target':>8}  {'SL':>8}  {'F':1}  {'Res':5}  "
+           f"{'Entry':>8}  {'Shrs':>5}  {'Target':>8}  {'SL':>8}  {'F':1}  {'Res':5}  "
            f"{'Ret%':>7}  {'Days':>5}  {'Tgt Hit':<10}  {'SL Hit':<10}")
     sep = "-" * len(hdr)
     print(f"\n{sep}")
@@ -912,7 +996,7 @@ def main():
         sl_date_str = str(r["sl_date"]) if r["sl_date"] else "--"
 
         row_str = (f"{r['rank']:<3}  {r['symbol']:<14}  {r['score']:>5.1f}  {sec:<8}  "
-                   f"{r['entry_date']:<10}  {r['entry']:>8.2f}  {r['target']:>8.2f}  "
+                   f"{r['entry_date']:<10}  {r['entry']:>8.2f}  {r['shares']:>5}  {r['target']:>8.2f}  "
                    f"{r['sl']:>8.2f}  {fill_char:1}  {r['result']:5}  "
                    f"{r['return_pct']:>+6.2f}%  {r['hold_days']:>5}  "
                    f"{tgt_date_str:<10}  {sl_date_str:<10}")
@@ -935,20 +1019,47 @@ def main():
     total_return = sum(r["return_pct"] for r in rows)
     avg_return = total_return / len(rows) if rows else 0
     avg_hold = sum(r["hold_days"] for r in rows) / len(rows) if rows else 0
-    summary = (f"Total Return: {total_return:+.2f}% | Avg Return: {avg_return:+.2f}% | "
-               f"Win Rate: {hit_rate:.0f}% | Avg Hold Days: {avg_hold:.1f} | "
-               f"Wins: {wins} Losses: {losses}")
+    total_costs = sum(r["costs"] for r in rows)
+    final_capital = equity_curve[-1] if equity_curve else starting_capital
+    total_return_pct = (final_capital - starting_capital) / starting_capital * 100
+
+    # Sharpe: annualized from trade returns
+    trade_returns = [r["return_pct"] for r in rows if r["return_pct"] != 0] if rows else [0]
+    sharpe = 0.0
+    if len(trade_returns) > 1 and statistics.stdev(trade_returns) > 0:
+        sharpe = round((252 ** 0.5) * statistics.mean(trade_returns) / statistics.stdev(trade_returns), 2)
+
+    # Max drawdown from equity curve
+    max_dd = 0.0
+    peak = equity_curve[0]
+    for val in equity_curve:
+        if val > peak:
+            peak = val
+        dd = (peak - val) / peak * 100
+        if dd > max_dd:
+            max_dd = dd
+
+    summary = (f"Total Return: {total_return:+.2f}% | Net Return: {total_return_pct:+.2f}% | "
+               f"Final Capital: Rs{final_capital:,.2f} | "
+               f"Sharpe: {sharpe:.2f} | Max DD: {max_dd:.1f}% | "
+               f"Win Rate: {hit_rate:.0f}% | Costs: Rs{total_costs:,.2f}")
     print(f"{BOLD}{summary}{RESET}")
 
     summary_dict = {
         "total_return": total_return, "avg_return": avg_return,
         "win_rate": hit_rate, "avg_hold": avg_hold,
-        "wins": wins, "losses": losses, "draws": draws
+        "wins": wins, "losses": losses, "draws": draws,
+        "total_return_pct": round(total_return_pct, 2),
+        "final_capital": round(final_capital, 2),
+        "total_costs": round(total_costs, 2),
+        "sharpe": sharpe,
+        "max_drawdown": round(max_dd, 2),
     }
     report_path = generate_backtest_html(
         as_of_date, regime_label, breadth, vix_proxy, vix_20d_avg,
         spike_label, spike_ratio, spike_blocked=False, rows=rows, summary=summary_dict,
-        below_threshold_count=below_threshold_count, above_max_count=above_max_count
+        below_threshold_count=below_threshold_count, above_max_count=above_max_count,
+        starting_capital=starting_capital, cost_model=cost_model, rr_ratio=rr_ratio
     )
     print(f"\n  HTML Report: {report_path}")
 

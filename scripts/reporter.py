@@ -16,7 +16,23 @@ def log(entry):
     sys.stdout.flush()
 
 
-def generate_html_report(ranked, market_regime, run_metadata, today, report_path):
+def compute_position(capital, risk_pct, entry_price, stoploss):
+    risk_amount = capital * (risk_pct / 100)
+    risk_per_share = abs(entry_price - stoploss)
+    if risk_per_share <= 0:
+        return 0, 0
+    shares = int(risk_amount / risk_per_share)
+    position_value = shares * entry_price
+    max_allowed = capital * 0.25
+    if position_value > max_allowed:
+        shares = int(max_allowed / entry_price)
+        position_value = shares * entry_price
+    if shares < 1:
+        return 0, 0
+    return shares, round(position_value, 2)
+
+
+def generate_html_report(ranked, market_regime, run_metadata, today, report_path, capital=500000, risk_per_trade=1.0):
     picks_html = ""
     for s in ranked:
         fb = s.get("factor_breakdown", {})
@@ -25,6 +41,7 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
         drivers_str = ", ".join(f"{k}: {v:.0f}" for k, v in top_drivers)
         score = s["composite"]
         bar_color = "#FBBF24" if score < 65 else "#38BDF8" if score < 70 else "#4ADE80"
+        shares = compute_position(capital, risk_per_trade, s["entry_price"], s["stoploss"])[0]
         picks_html += f'''
     <tr>
       <td class="rank">#{s["rank"]}</td>
@@ -36,6 +53,7 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
         </div>
       </td>
       <td class="price-cell">₹{s["entry_price"]:,.2f}</td>
+      <td class="price-cell">{shares if shares > 0 else '—'}</td>
       <td class="price-cell target">₹{s["target_price"]:,.2f}</td>
       <td class="price-cell stoploss">₹{s["stoploss"]:,.2f}</td>
       <td class="drivers-cell"><span class="drivers-text">{drivers_str}</span></td>
@@ -398,6 +416,7 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
     <span>Stocks Scored: <strong>{scored}</strong></span>
     <span>Data Freshness: <strong>{freshness}%</strong></span>
     <span>Top Picks: <strong>{picks_count}</strong></span>
+    <span class="sep">|</span> Position: ₹{capital:,.0f} × {risk_per_trade}% risk
   </div>
 
   <div class="exec-summary">
@@ -452,6 +471,7 @@ def generate_html_report(ranked, market_regime, run_metadata, today, report_path
           <th>Symbol / Sector</th>
           <th style="width:140px">Score</th>
           <th style="width:95px" class="th-right">Entry</th>
+          <th style="width:70px" class="th-right">Shares</th>
           <th style="width:95px" class="th-right">Target</th>
           <th style="width:95px" class="th-right">Stoploss</th>
           <th>Key Drivers</th>
@@ -522,7 +542,7 @@ def get_update_summary(conn):
     return {"symbols_total": total, "data_through_date": through_date}
 
 
-def run(ranked, rejected, run_ts, weights):
+def run(ranked, rejected, run_ts, weights, capital=100000, risk_per_trade=1.0):
     today = date.today().isoformat()
     conn = sqlite3.connect(DB_PATH)
 
@@ -572,7 +592,7 @@ def run(ranked, rejected, run_ts, weights):
         json.dump(context, f, indent=2)
 
     html_path = os.path.join(OUTPUT_DIR, f'swing_report_{today}.html')
-    generate_html_report(ranked, market_regime, context["run_metadata"], today, html_path)
+    generate_html_report(ranked, market_regime, context["run_metadata"], today, html_path, capital=capital, risk_per_trade=risk_per_trade)
 
     entry = {"stage": "report", "file": f"output/context_{today}.json",
              "size_kb": round(os.path.getsize(context_path) / 1024, 1),
@@ -605,10 +625,14 @@ def run(ranked, rejected, run_ts, weights):
     print(separator)
     print(header)
     print(separator)
-    print(f"  {'Rank':<5} {'Symbol':<18} {'Score':<8} {'Entry':<12} {'Target':<12} {'Stoploss':<12}")
-    print(f"  {'-'*5} {'-'*18} {'-'*8} {'-'*12} {'-'*12} {'-'*12}")
+    print(f"  {'Rank':<5} {'Symbol':<18} {'Score':<8} {'Entry':<12} {'Shrs':<6} {'Target':<12} {'Stoploss':<12}")
+    print(f"  {'-'*5} {'-'*18} {'-'*8} {'-'*12} {'-'*6} {'-'*12} {'-'*12}")
     for s in ranked:
-        print(f"  #{s['rank']:<4} {s['symbol']:<18} {s['composite']:<8.1f} Rs{s['entry_price']:<11,.2f} Rs{s['target_price']:<11,.2f} Rs{s['stoploss']:<11,.2f}")
+        shares = compute_position(capital, risk_per_trade, s["entry_price"], s["stoploss"])[0]
+        shares_str = str(shares) if shares > 0 else '—'
+        print(f"  #{s['rank']:<4} {s['symbol']:<18} {s['composite']:<8.1f} Rs{s['entry_price']:<11,.2f} {shares_str:<6} Rs{s['target_price']:<11,.2f} Rs{s['stoploss']:<11,.2f}")
+
+    print(f"  Position sizing: Rs{capital:,.0f} capital x {risk_per_trade}% risk per trade")
 
     if warnings:
         print()

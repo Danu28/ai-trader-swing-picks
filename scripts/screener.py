@@ -73,7 +73,7 @@ def get_current_price(conn, symbol, as_of_date=None):
     return float(row[0]) if row else 0
 
 
-def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
+def run(top_n=5, weights=None, sector_cap=2, as_of_date=None, rr_ratio=1.5):
     if weights is None:
         weights = dict(DEFAULT_WEIGHTS)
 
@@ -214,7 +214,7 @@ def run(top_n=5, weights=None, sector_cap=2, as_of_date=None):
 
         entry_price = price
 
-        target_price = entry_price + (1.5 * atr_val) if atr_val > 0 else entry_price * 1.04
+        target_price = entry_price + (rr_ratio * 1.5 * atr_val) if atr_val > 0 else entry_price * (1 + rr_ratio * 0.04)
         stoploss = entry_price - (1.5 * atr_val) if atr_val > 0 else entry_price * 0.96
 
         stock["entry_price"] = round(entry_price, 2)

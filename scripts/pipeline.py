@@ -20,6 +20,8 @@ def main():
     parser.add_argument('--weights', type=str, default=None,
                         help='Comma-separated factor weights: momentum=0.35,trend_quality=0.25,mean_reversion=0.25,quality=0.15')
     parser.add_argument('--sector-cap', type=int, default=2, help='Max stocks per sector (default: 2)')
+    parser.add_argument('--capital', type=float, default=100000, help='Capital for position sizing (default: 100000)')
+    parser.add_argument('--risk-per-trade', type=float, default=1.0, help='Risk per trade %% of capital (default: 1.0)')
 
     args = parser.parse_args()
 
@@ -98,7 +100,7 @@ def main():
             print(f"      No picks within score range (60-75).")
 
     print("[4/4] Generating reports...")
-    report_result = run_reporter(ranked, rejected, run_ts, weights)
+    report_result = run_reporter(ranked, rejected, run_ts, weights, capital=args.capital, risk_per_trade=args.risk_per_trade)
     all_warnings.extend(report_result.get("warnings", []))
 
     if all_warnings:
