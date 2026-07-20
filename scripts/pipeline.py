@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from updater import run as run_updater
 from factors import run as run_factors
-from screener import run as run_screener
+from screener import run as run_screener, auto_weights, DEFAULT_WEIGHTS
 from reporter import run as run_reporter
 
 
@@ -69,21 +69,13 @@ def main():
                                "ts": datetime.now().isoformat()}))
             sys.exit(0)
 
-    if not args.weights:
-        if regime_label == "risk_off":
-            weights = {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
-        elif regime_label == "neutral":
-            weights = {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
-        else:
-            weights = {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
-    else:
-        weights = {
-            "momentum": 0.35, "trend_quality": 0.25,
-            "mean_reversion": 0.25, "quality": 0.15
-        }
+    if args.weights:
+        weights = dict(DEFAULT_WEIGHTS)
         for pair in args.weights.split(','):
             k, v = pair.split('=')
             weights[k.strip()] = float(v.strip())
+    else:
+        weights = auto_weights(regime_label)
 
     print("[3/4] Screening and ranking...")
     screen_result = run_screener(top_n=top_n, weights=weights, sector_cap=sector_cap)

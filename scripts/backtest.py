@@ -7,7 +7,7 @@ from datetime import datetime, date
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from factors import run as run_factors
-from screener import run as run_screener
+from screener import run as run_screener, auto_weights, DEFAULT_WEIGHTS
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'market_data.db')
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output')
@@ -318,20 +318,15 @@ def main():
         print(f"\n  HTML Report: {report_path}")
         return
 
-    weights = {}
-    if not args.weights:
-        if args.no_regime_gate:
-            weights.update({"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15})
-        elif regime_label == "risk_off":
-            weights.update({"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35})
-        elif regime_label == "neutral":
-            weights.update({"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20})
-        else:
-            weights.update({"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15})
-    else:
+    if args.weights:
+        weights = dict(DEFAULT_WEIGHTS)
         for pair in args.weights.split(','):
             k, v = pair.split('=')
             weights[k.strip()] = float(v.strip())
+    elif args.no_regime_gate:
+        weights = dict(DEFAULT_WEIGHTS)
+    else:
+        weights = auto_weights(regime_label)
 
     screen_result = run_screener(top_n=top_n, weights=weights, as_of_date=as_of_date)
     ranked = screen_result["ranked"]

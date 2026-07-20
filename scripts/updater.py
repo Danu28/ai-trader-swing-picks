@@ -8,7 +8,6 @@ from datetime import datetime, date, timedelta
 import yfinance as yf
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'market_data.db')
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
 
 
 def log(entry):
@@ -16,26 +15,14 @@ def log(entry):
     sys.stdout.flush()
 
 
-def write_log_file(log_entries, log_path):
-    with open(log_path, 'w') as f:
-        for entry in log_entries:
-            f.write(json.dumps(entry) + '\n')
-
-
 def run(max_retries=3, retry_delay=5):
-    log_entries = []
     today = date.today().isoformat()
-    log_dir = LOG_DIR
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f'pipeline_{today}.log')
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     symbols = [r[0] for r in c.execute("SELECT symbol FROM stocks").fetchall()]
-    entry = {"stage": "update", "status": "start", "symbols_total": len(symbols), "ts": datetime.now().isoformat()}
-    log(entry)
-    log_entries.append(entry)
+    log({"stage": "update", "status": "start", "symbols_total": len(symbols), "ts": datetime.now().isoformat()})
 
     updated = 0
     skipped = 0
@@ -53,7 +40,6 @@ def run(max_retries=3, retry_delay=5):
                      "reason": "already_current", "latest_date": latest_date,
                      "ts": datetime.now().isoformat()}
             log(entry)
-            log_entries.append(entry)
             skipped += 1
             continue
 
@@ -72,7 +58,6 @@ def run(max_retries=3, retry_delay=5):
                     entry = {"stage": "update", "symbol": symbol, "action": "no_new_data",
                              "reason": "yfinance_empty_response", "ts": datetime.now().isoformat()}
                     log(entry)
-                    log_entries.append(entry)
                     skipped += 1
                     break
 
@@ -93,7 +78,6 @@ def run(max_retries=3, retry_delay=5):
                          "rows": rows_inserted, "date_range": date_range,
                          "ts": datetime.now().isoformat()}
                 log(entry)
-                log_entries.append(entry)
                 updated += 1
                 break
 
@@ -104,7 +88,6 @@ def run(max_retries=3, retry_delay=5):
                 entry = {"stage": "update", "symbol": symbol, "action": "error",
                          "error": str(e), "retries": attempt, "ts": datetime.now().isoformat()}
                 log(entry)
-                log_entries.append(entry)
                 errors += 1
                 errors_detail.append({"symbol": symbol, "error": str(e)})
                 break
@@ -115,9 +98,6 @@ def run(max_retries=3, retry_delay=5):
     entry = {"stage": "update", "status": "complete", "updated": updated, "skipped": skipped,
              "errors": errors, "errors_detail": errors_detail, "ts": datetime.now().isoformat()}
     log(entry)
-    log_entries.append(entry)
-
-    write_log_file(log_entries, log_path)
 
     conn.close()
     return {
@@ -125,7 +105,6 @@ def run(max_retries=3, retry_delay=5):
         "skipped": skipped,
         "errors": errors,
         "errors_detail": errors_detail,
-        "log_path": log_path
     }
 
 

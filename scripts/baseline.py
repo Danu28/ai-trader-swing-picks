@@ -6,7 +6,7 @@ Usage:
     python scripts/baseline.py --experiment-name my_experiment
 """
 
-# Baseline (auto-updated 2026-07-19):
+# Baseline (auto-updated 2026-07-20):
 #   Overall: Win Rate=60.9%, Avg Return=+0.93%, Total Return=+59.78%
 #   risk_on:  Win Rate=53.3%, Total Return=+4.71%
 #   neutral:  Win Rate=58.8%, Total Return=+12.39%
@@ -23,7 +23,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from factors import run as run_factors, VIX_SPIKE_THRESHOLD
-from screener import run as run_screener
+from screener import run as run_screener, auto_weights
 from backtest import check_forward, DB_PATH, OUTPUT_DIR
 
 BASELINE_DATES = [
@@ -51,26 +51,7 @@ RESET = '\033[0m'
 BOLD = '\033[1m'
 
 
-@contextlib.contextmanager
-def suppress_stdout():
-    """Temporarily suppress stdout to keep pipeline noise out of console table."""
-    with open(os.devnull, 'w') as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
-
-
-def auto_weights(regime_label):
-    """Return regime-appropriate factor weights matching backtest.py logic."""
-    if regime_label == "risk_off":
-        return {"momentum": 0.20, "trend_quality": 0.20, "mean_reversion": 0.25, "quality": 0.35}
-    elif regime_label == "neutral":
-        return {"momentum": 0.30, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.20}
-    else:  # risk_on or unknown
-        return {"momentum": 0.35, "trend_quality": 0.25, "mean_reversion": 0.25, "quality": 0.15}
+suppress_stdout = lambda: contextlib.redirect_stdout(open(os.devnull, 'w'))
 
 
 def compute_return_pct(result, stats, entry_price, target_price, stoploss):
